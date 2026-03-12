@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, EyeOff, UserCheck, Ban, Clock } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, UserCheck, Ban, Clock, Mail } from "lucide-react";
 
 interface VfsAccount {
   id: string;
@@ -17,13 +17,18 @@ interface VfsAccount {
   last_used_at: string | null;
   fail_count: number;
   notes: string | null;
+  imap_host: string | null;
+  imap_password: string | null;
 }
 
 export default function VfsAccounts() {
   const [accounts, setAccounts] = useState<VfsAccount[]>([]);
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [newImapHost, setNewImapHost] = useState("imap.gmail.com");
+  const [newImapPassword, setNewImapPassword] = useState("");
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
+  const [showImapPasswords, setShowImapPasswords] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -44,16 +49,21 @@ export default function VfsAccounts() {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.from("vfs_accounts").insert({
+    const insertData = {
       email: newEmail,
       password: newPassword,
-    });
+      imap_host: newImapHost || "imap.gmail.com",
+      imap_password: newImapPassword || null,
+    };
+    const { error } = await supabase.from("vfs_accounts").insert(insertData);
     if (error) {
       toast.error("Hesap eklenemedi: " + error.message);
     } else {
       toast.success("VFS hesabı eklendi");
       setNewEmail("");
       setNewPassword("");
+      setNewImapHost("imap.gmail.com");
+      setNewImapPassword("");
       loadAccounts();
     }
     setLoading(false);
@@ -122,6 +132,30 @@ export default function VfsAccounts() {
             />
           </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs flex items-center gap-1"><Mail className="w-3 h-3" /> IMAP Sunucu</Label>
+            <Input
+              type="text"
+              placeholder="imap.gmail.com"
+              value={newImapHost}
+              onChange={(e) => setNewImapHost(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs flex items-center gap-1"><Mail className="w-3 h-3" /> IMAP / App Şifre</Label>
+            <Input
+              type="password"
+              placeholder="Gmail App Password"
+              value={newImapPassword}
+              onChange={(e) => setNewImapPassword(e.target.value)}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          OTP otomatik okuma için IMAP bilgilerini girin. Gmail kullanıyorsanız{" "}
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" className="text-primary underline">App Password</a> oluşturun.
+        </p>
         <Button onClick={addAccount} disabled={loading} size="sm" className="gap-1.5">
           <Plus className="w-4 h-4" /> Hesap Ekle
         </Button>
@@ -149,6 +183,16 @@ export default function VfsAccounts() {
                     {showPasswords[acc.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
+                {acc.imap_password && (
+                  <span className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
+                    <Mail className="w-3 h-3" /> IMAP: {acc.imap_host || "imap.gmail.com"}
+                  </span>
+                )}
+                {!acc.imap_password && (
+                  <span className="text-xs text-amber-500 flex items-center gap-1 mt-0.5">
+                    <Mail className="w-3 h-3" /> IMAP yapılandırılmadı
+                  </span>
+                )}
                 {acc.fail_count > 0 && (
                   <span className="text-xs text-destructive">Başarısız giriş: {acc.fail_count}</span>
                 )}

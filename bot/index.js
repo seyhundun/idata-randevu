@@ -143,7 +143,28 @@ async function waitForLoginFormAfterQueue(page) {
 
 // ==================== OTP HANDLING ====================
 
-async function handleOtpVerification(page) {
+async function readOtpFromEmail(accountId) {
+  try {
+    console.log("  [OTP] Email'den OTP okunuyor...");
+    const res = await fetch(`${CONFIG.API_URL.replace("/bot-api", "/read-otp")}`, {
+      method: "POST",
+      headers: apiHeaders,
+      body: JSON.stringify({ account_id: accountId }),
+    });
+    const data = await res.json();
+    if (data.ok && data.otp) {
+      console.log(`  [OTP] ✅ OTP bulundu: ${data.otp}`);
+      return data.otp;
+    }
+    console.log(`  [OTP] ❌ OTP bulunamadı: ${data.error || "Yeni email yok"}`);
+    return null;
+  } catch (err) {
+    console.error("  [OTP] Email okuma hatası:", err.message);
+    return null;
+  }
+}
+
+async function handleOtpVerification(page, account) {
   // OTP sayfası kontrolü - email veya SMS ile gelen doğrulama kodu
   const hasOtp = await page.evaluate(() => {
     const body = (document.body?.innerText || "").toLowerCase();
@@ -165,15 +186,73 @@ async function handleOtpVerification(page) {
 
   if (!hasOtp) return { ok: true, reason: "no_otp" };
 
-  console.log("  [OTP] ⚠ Doğrulama kodu isteniyor (Email/SMS)!");
-  console.log("  [OTP] Bu adım manuel müdahale gerektirir.");
-  console.log("  [OTP] OTP sayfasında bekleniyor...");
-
-  // OTP sayfasının ekran görüntüsünü al
+  console.log("  [OTP] ⚠ Doğrulama kodu isteniyor!");
   const ss = await takeScreenshotBase64(page);
+
+  // IMAP ile OTP okumayı dene
+  const startTime = Date.now();
+  const maxWait = CONFIG.OTP_WAIT_MS; // 2dk
+  const pollInterval = CONFIG.OTP_POLL_MS; // 5sn
   
-  // OTP'nin otomatik çözümü şu an desteklenmiyor
-  // Gelecekte: IMAP email okuma veya SMS API entegrasyonu eklenebilir
+  while (Date.now() - startTime < maxWait) {
+    const otp = await readOtpFromEmail(account.id);
+    
+    if (otp) {
+      // OTP'yi sayfadaki input'a yaz
+      const filled = await page.evaluate((code) => {
+        // Tek büyük input
+        const singleInput = document.querySelector('input[type="text"][name*="otp"], input[type="text"][name*="code"], input[type="number"], input[type="tel"]');
+        if (singleInput) {
+          singleInput.value = code;
+          singleInput.dispatchEvent(new Event("input", { bubbles: true }));
+          singleInput.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+        // Birden fazla input (her hane ayrı)
+        const inputs = document.querySelectorAll('input[type="text"], input[type="tel"]');
+        const otpInputs = [...inputs].filter(inp => {
+          const maxLen = inp.maxLength;
+          return maxLen === 1 || maxLen === -1;
+        });
+        if (otpInputs.length >= 4 && otpInputs.length <= 8) {
+          for (let i = 0; i < Math.min(code.length, otpInputs.length); i++) {
+            otpInputs[i].value = code[i];
+            otpInputs[i].dispatchEvent(new Event("input", { bubbles: true }));
+            otpInputs[i].dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          return true;
+        }
+        return false;
+      }, otp);
+
+      if (filled) {
+        console.log("  [OTP] ✅ Kod girildi, gönderiliyor...");
+        await delay(500, 1000);
+        // Submit butonuna tıkla
+        const submitted = await page.evaluate(() => {
+          const btns = [...document.querySelectorAll("button")];
+          const submitBtn = btns.find(b => {
+            const txt = b.textContent.toLowerCase();
+            return txt.includes("verify") || txt.includes("doğrula") || txt.includes("onayla") || 
+                   txt.includes("submit") || txt.includes("gönder") || txt.includes("confirm");
+          }) || document.querySelector('button[type="submit"]');
+          if (submitBtn) { submitBtn.click(); return true; }
+          return false;
+        });
+        if (submitted) {
+          await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 15000 }).catch(() => {});
+          await delay(2000, 3000);
+        }
+        return { ok: true, reason: "otp_solved" };
+      }
+    }
+    
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`  [OTP] Bekleniyor... ${elapsed}s / ${maxWait / 1000}s`);
+    await delay(pollInterval, pollInterval + 1000);
+  }
+
+  console.log("  [OTP] ❌ OTP zaman aşımı - kod bulunamadı");
   return { ok: false, reason: "otp_required", screenshot: ss };
 }
 
@@ -328,7 +407,7 @@ async function checkAppointments(config, account) {
 
     // STEP 5: OTP Doğrulama Kontrolü
     console.log("  [5/6] OTP kontrol...");
-    const otpResult = await handleOtpVerification(page);
+    const otpResult = await handleOtpVerification(page, account);
     if (!otpResult.ok && otpResult.reason === "otp_required") {
       console.log("  [5/6] ❌ OTP doğrulama gerekli - hesap beklemeye alınıyor");
       await reportResult(id, "error", `OTP doğrulama gerekli | Hesap: ${account.email} | Manuel müdahale gerekli`, 0, otpResult.screenshot);
