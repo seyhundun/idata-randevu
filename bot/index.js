@@ -1,4 +1,3 @@
-cd /root/bot && pm2 stop vfs-bot && cat > index.js << 'ENDOFFILE'
 /**
  * VFS Global Randevu Takip Botu v6
  * 
