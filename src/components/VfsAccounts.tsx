@@ -103,6 +103,11 @@ export default function VfsAccounts() {
       toast.error("Email ve şifre gerekli");
       return;
     }
+    const pwError = validateVfsPassword(newPassword);
+    if (pwError) {
+      toast.error("Şifre uygun değil: " + pwError);
+      return;
+    }
     setLoading(true);
 
     if (addMode === "register") {
