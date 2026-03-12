@@ -49,12 +49,12 @@ export default function VfsAccounts() {
       return;
     }
     setLoading(true);
-    const insertData: Record<string, unknown> = {
+    const insertData = {
       email: newEmail,
       password: newPassword,
+      imap_host: newImapHost || "imap.gmail.com",
+      imap_password: newImapPassword || null,
     };
-    if (newImapHost) insertData.imap_host = newImapHost;
-    if (newImapPassword) insertData.imap_password = newImapPassword;
     const { error } = await supabase.from("vfs_accounts").insert(insertData);
     if (error) {
       toast.error("Hesap eklenemedi: " + error.message);
