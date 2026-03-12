@@ -32,6 +32,7 @@ export default function VfsAccounts() {
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [showImapPasswords, setShowImapPasswords] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  const [smsOtpInputs, setSmsOtpInputs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadAccounts();
