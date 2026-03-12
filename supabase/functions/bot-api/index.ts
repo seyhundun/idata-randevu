@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
   const path = url.pathname.split("/").pop();
 
   try {
-    // GET — Returns all active tracking configs with applicants
+    // GET — Returns all active tracking configs with applicants + available VFS accounts
     if (req.method === "GET" && (!path || path === "bot-api" || path === "config")) {
       const { data: configs, error } = await supabase
         .from("tracking_configs")
@@ -39,53 +39,62 @@ Deno.serve(async (req) => {
         })
       );
 
-      return new Response(JSON.stringify({ ok: true, configs: results }), {
+      // Get available VFS accounts (active or cooldown expired)
+      const now = new Date().toISOString();
+      const { data: accounts } = await supabase
+        .from("vfs_accounts")
+        .select("id, email, password, status, banned_until, fail_count, last_used_at")
+        .or(`status.eq.active,and(status.eq.cooldown,banned_until.lt.${now})`)
+        .order("last_used_at", { ascending: true, nullsFirst: true });
+
+      return new Response(JSON.stringify({ ok: true, configs: results, accounts: accounts ?? [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // POST — Bot posts check results (JSON or multipart with screenshot)
+    // POST — Bot posts check results or account status updates
     if (req.method === "POST") {
       const contentType = req.headers.get("content-type") || "";
-
-      let config_id: string;
-      let status: string;
-      let message: string | null = null;
-      let slots_available = 0;
-      let screenshot_url: string | null = null;
-
-      if (contentType.includes("multipart/form-data")) {
-        // Multipart: screenshot + fields
-        const formData = await req.formData();
-        config_id = formData.get("config_id") as string;
-        status = formData.get("status") as string;
-        message = (formData.get("message") as string) || null;
-        slots_available = parseInt(formData.get("slots_available") as string) || 0;
-        const file = formData.get("screenshot") as File | null;
-
-        if (file && file.size > 0) {
-          const fileName = `${config_id}/${Date.now()}_${status}.png`;
-          const { error: uploadError } = await supabase.storage
-            .from("bot-screenshots")
-            .upload(fileName, file, { contentType: "image/png", upsert: false });
-
-          if (!uploadError) {
-            const { data: urlData } = supabase.storage
-              .from("bot-screenshots")
-              .getPublicUrl(fileName);
-            screenshot_url = urlData.publicUrl;
-          } else {
-            console.error("Upload error:", uploadError);
+      
+      // Check if this is an account status update
+      if (contentType.includes("application/json")) {
+        const bodyText = await req.text();
+        const body = JSON.parse(bodyText);
+        
+        // Account status update endpoint
+        if (body.action === "update_account") {
+          const { account_id, status, banned_until, fail_count } = body;
+          if (!account_id) {
+            return new Response(
+              JSON.stringify({ ok: false, error: "account_id required" }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
           }
+          
+          const updateData: Record<string, unknown> = { status, last_used_at: new Date().toISOString() };
+          if (banned_until) updateData.banned_until = banned_until;
+          if (fail_count !== undefined) updateData.fail_count = fail_count;
+          
+          const { error: updateError } = await supabase
+            .from("vfs_accounts")
+            .update(updateData)
+            .eq("id", account_id);
+          
+          if (updateError) throw updateError;
+          
+          return new Response(
+            JSON.stringify({ ok: true, message: `Account ${account_id} updated to ${status}` }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
         }
-      } else {
-        // JSON body
-        const body = await req.json();
-        config_id = body.config_id;
-        status = body.status;
-        message = body.message ?? null;
-        slots_available = body.slots_available ?? 0;
-        // Support base64 screenshot in JSON
+        
+        // Regular log posting (JSON)
+        let config_id = body.config_id;
+        let status = body.status;
+        let message = body.message ?? null;
+        let slots_available = body.slots_available ?? 0;
+        let screenshot_url: string | null = null;
+        
         if (body.screenshot_base64) {
           const bytes = Uint8Array.from(atob(body.screenshot_base64), c => c.charCodeAt(0));
           const fileName = `${config_id}/${Date.now()}_${status}.png`;
@@ -99,38 +108,71 @@ Deno.serve(async (req) => {
             screenshot_url = urlData.publicUrl;
           }
         }
-      }
 
-      if (!config_id || !status) {
+        if (!config_id || !status) {
+          return new Response(
+            JSON.stringify({ ok: false, error: "config_id and status are required" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const { error: logError } = await supabase.from("tracking_logs").insert({
+          config_id, status, message: message ?? null, slots_available, screenshot_url,
+        });
+        if (logError) throw logError;
+
+        if (status === "found") {
+          await supabase.from("tracking_configs").update({ is_active: false }).eq("id", config_id);
+        }
+
         return new Response(
-          JSON.stringify({ ok: false, error: "config_id and status are required" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ ok: true, message: `Log recorded: ${status}`, screenshot_url }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      
+      // Multipart form data
+      if (contentType.includes("multipart/form-data")) {
+        const formData = await req.formData();
+        const config_id = formData.get("config_id") as string;
+        const status = formData.get("status") as string;
+        const message = (formData.get("message") as string) || null;
+        const slots_available = parseInt(formData.get("slots_available") as string) || 0;
+        let screenshot_url: string | null = null;
+        const file = formData.get("screenshot") as File | null;
 
-      // Insert log with screenshot
-      const { error: logError } = await supabase.from("tracking_logs").insert({
-        config_id,
-        status,
-        message: message ?? null,
-        slots_available,
-        screenshot_url,
-      });
+        if (file && file.size > 0) {
+          const fileName = `${config_id}/${Date.now()}_${status}.png`;
+          const { error: uploadError } = await supabase.storage
+            .from("bot-screenshots")
+            .upload(fileName, file, { contentType: "image/png", upsert: false });
+          if (!uploadError) {
+            const { data: urlData } = supabase.storage.from("bot-screenshots").getPublicUrl(fileName);
+            screenshot_url = urlData.publicUrl;
+          }
+        }
 
-      if (logError) throw logError;
+        if (!config_id || !status) {
+          return new Response(
+            JSON.stringify({ ok: false, error: "config_id and status are required" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-      // If found, deactivate the config
-      if (status === "found") {
-        await supabase
-          .from("tracking_configs")
-          .update({ is_active: false })
-          .eq("id", config_id);
+        const { error: logError } = await supabase.from("tracking_logs").insert({
+          config_id, status, message, slots_available, screenshot_url,
+        });
+        if (logError) throw logError;
+
+        if (status === "found") {
+          await supabase.from("tracking_configs").update({ is_active: false }).eq("id", config_id);
+        }
+
+        return new Response(
+          JSON.stringify({ ok: true, message: `Log recorded: ${status}`, screenshot_url }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-
-      return new Response(
-        JSON.stringify({ ok: true, message: `Log recorded: ${status}`, screenshot_url }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
     }
 
     return new Response(

@@ -1,19 +1,16 @@
 /**
- * VFS Global Randevu Takip Botu v4
+ * VFS Global Randevu Takip Botu v5
  * 
- * Akış:
- * 1. Cookie banner'ı kapat
- * 2. Cloudflare Turnstile CAPTCHA çöz (2captcha)
- * 3. Login yap ve doğrula
- * 4. Dashboard'dan randevu sayfasına git
- * 5. Randevu kontrol et
- * 6. Screenshot + sonuç API'ye bildir
+ * Yenilikler:
+ * - Çoklu VFS hesap desteği (dashboard'dan yönetim)
+ * - Hesap rotasyonu (ban durumunda sıradaki hesaba geç)
+ * - Email/SMS OTP doğrulama desteği
+ * - Banlanan hesaplar otomatik beklemeye alınır
  */
 
 require("dotenv").config();
 const puppeteer = require("puppeteer");
 
-// 2captcha (opsiyonel)
 let Solver;
 try {
   const mod = require("2captcha-ts");
@@ -26,13 +23,14 @@ const CONFIG = {
   API_URL: "https://ocrpzwrsyiprfuzsyivf.supabase.co/functions/v1/bot-api",
   API_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
   VFS_URL: "https://visa.vfsglobal.com/tur/tr/fra/login",
-  VFS_EMAIL: process.env.VFS_EMAIL || "",
-  VFS_PASSWORD: process.env.VFS_PASSWORD || "",
   CAPTCHA_API_KEY: process.env.CAPTCHA_API_KEY || "",
   HEADLESS: true,
   SLOW_MO: 50,
-  QUEUE_MAX_WAIT_MS: Number(process.env.QUEUE_MAX_WAIT_MS || 300000), // 5dk
+  QUEUE_MAX_WAIT_MS: Number(process.env.QUEUE_MAX_WAIT_MS || 300000),
   QUEUE_POLL_MS: Number(process.env.QUEUE_POLL_MS || 8000),
+  COOLDOWN_HOURS: Number(process.env.COOLDOWN_HOURS || 2),
+  OTP_WAIT_MS: Number(process.env.OTP_WAIT_MS || 120000), // 2dk OTP bekleme
+  OTP_POLL_MS: Number(process.env.OTP_POLL_MS || 5000),
 };
 
 // ==================== HELPERS ====================
@@ -41,17 +39,19 @@ function delay(min = 1000, max = 3000) {
   return new Promise((r) => setTimeout(r, Math.floor(Math.random() * (max - min) + min)));
 }
 
+const apiHeaders = {
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${CONFIG.API_KEY}`,
+  apikey: CONFIG.API_KEY,
+};
+
 async function reportResult(configId, status, message = "", slotsAvailable = 0, screenshotBase64 = null) {
   try {
     const body = { config_id: configId, status, message, slots_available: slotsAvailable };
     if (screenshotBase64) body.screenshot_base64 = screenshotBase64;
     const res = await fetch(CONFIG.API_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${CONFIG.API_KEY}`,
-        apikey: CONFIG.API_KEY,
-      },
+      headers: apiHeaders,
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -61,26 +61,41 @@ async function reportResult(configId, status, message = "", slotsAvailable = 0, 
   }
 }
 
+async function updateAccountStatus(accountId, status, failCount = null) {
+  try {
+    const body = { action: "update_account", account_id: accountId, status };
+    if (status === "cooldown") {
+      const until = new Date(Date.now() + CONFIG.COOLDOWN_HOURS * 3600000).toISOString();
+      body.banned_until = until;
+    }
+    if (failCount !== null) body.fail_count = failCount;
+    await fetch(CONFIG.API_URL, {
+      method: "POST",
+      headers: apiHeaders,
+      body: JSON.stringify(body),
+    });
+    console.log(`  [ACCOUNT] ${accountId.substring(0, 8)}... → ${status}`);
+  } catch (err) {
+    console.error("  [ACCOUNT] Güncelleme hatası:", err.message);
+  }
+}
+
 async function fetchActiveConfigs() {
   try {
-    const res = await fetch(CONFIG.API_URL, {
-      method: "GET",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${CONFIG.API_KEY}`, apikey: CONFIG.API_KEY },
-    });
+    const res = await fetch(CONFIG.API_URL, { method: "GET", headers: apiHeaders });
     const data = await res.json();
-    if (data.ok) return data.configs;
+    if (data.ok) return { configs: data.configs || [], accounts: data.accounts || [] };
     console.error("API hatası:", data.error);
-    return [];
+    return { configs: [], accounts: [] };
   } catch (err) {
     console.error("API bağlantı hatası:", err.message);
-    return [];
+    return { configs: [], accounts: [] };
   }
 }
 
 async function takeScreenshotBase64(page) {
   try {
-    const buf = await page.screenshot({ fullPage: true, encoding: "base64" });
-    return buf;
+    return await page.screenshot({ fullPage: true, encoding: "base64" });
   } catch { return null; }
 }
 
@@ -101,37 +116,65 @@ async function isWaitingRoomPage(page) {
 async function waitForLoginFormAfterQueue(page) {
   const startedAt = Date.now();
   let attempt = 0;
-
   while (Date.now() - startedAt < CONFIG.QUEUE_MAX_WAIT_MS) {
     attempt += 1;
-
     const emailInput = await page.$('input[type="email"], input[name="email"], #email');
     if (emailInput) {
       console.log(`  [QUEUE] ✅ Login formu hazır (${attempt}. deneme).`);
       return { ok: true };
     }
-
     const waitingRoom = await isWaitingRoomPage(page);
     if (waitingRoom) {
       const waitedSec = Math.round((Date.now() - startedAt) / 1000);
       console.log(`  [QUEUE] Sırada bekleniyor... ${waitedSec}s`);
-
       await solveTurnstile(page);
-
       if (attempt % 3 === 0) {
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
       } else {
         await page.waitForNavigation({ waitUntil: "networkidle2", timeout: CONFIG.QUEUE_POLL_MS }).catch(() => {});
       }
-
       await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 1200);
       continue;
     }
-
     await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 1200);
   }
-
   return { ok: false, reason: `Waiting room timeout (${Math.round(CONFIG.QUEUE_MAX_WAIT_MS / 1000)}s)` };
+}
+
+// ==================== OTP HANDLING ====================
+
+async function handleOtpVerification(page) {
+  // OTP sayfası kontrolü - email veya SMS ile gelen doğrulama kodu
+  const hasOtp = await page.evaluate(() => {
+    const body = (document.body?.innerText || "").toLowerCase();
+    const inputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="tel"]');
+    const hasOtpInput = [...inputs].some(inp => {
+      const name = (inp.name || "").toLowerCase();
+      const placeholder = (inp.placeholder || "").toLowerCase();
+      const id = (inp.id || "").toLowerCase();
+      return name.includes("otp") || name.includes("code") || name.includes("verification") ||
+             placeholder.includes("kod") || placeholder.includes("code") || placeholder.includes("doğrulama") ||
+             id.includes("otp") || id.includes("code");
+    });
+    const hasOtpText = body.includes("doğrulama kodu") || body.includes("verification code") ||
+                       body.includes("one-time") || body.includes("otp") ||
+                       body.includes("tek kullanımlık") || body.includes("sms") ||
+                       body.includes("e-posta") || body.includes("email");
+    return hasOtpInput || (hasOtpText && inputs.length > 0 && inputs.length <= 6);
+  });
+
+  if (!hasOtp) return { ok: true, reason: "no_otp" };
+
+  console.log("  [OTP] ⚠ Doğrulama kodu isteniyor (Email/SMS)!");
+  console.log("  [OTP] Bu adım manuel müdahale gerektirir.");
+  console.log("  [OTP] OTP sayfasında bekleniyor...");
+
+  // OTP sayfasının ekran görüntüsünü al
+  const ss = await takeScreenshotBase64(page);
+  
+  // OTP'nin otomatik çözümü şu an desteklenmiyor
+  // Gelecekte: IMAP email okuma veya SMS API entegrasyonu eklenebilir
+  return { ok: false, reason: "otp_required", screenshot: ss };
 }
 
 // ==================== CAPTCHA ====================
@@ -141,67 +184,44 @@ async function solveTurnstile(page) {
     console.log("  [CAPTCHA] API key veya 2captcha modülü yok, atlıyorum.");
     return false;
   }
-
-  // Turnstile iframe bul
   const sitekey = await page.evaluate(() => {
     const iframe = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
     if (!iframe) return null;
     const container = iframe.closest("div[data-sitekey]") || document.querySelector("[data-sitekey]");
     if (container) return container.getAttribute("data-sitekey");
-    // iframe src'den çıkar
     const src = iframe.getAttribute("src") || "";
     const match = src.match(/[?&]k=([^&]+)/);
     return match ? match[1] : null;
   });
-
   if (!sitekey) {
-    // Alternatif: cf-turnstile div ara
     const altKey = await page.evaluate(() => {
       const el = document.querySelector(".cf-turnstile");
       return el ? el.getAttribute("data-sitekey") : null;
     });
     if (!altKey) {
-      console.log("  [CAPTCHA] Turnstile bulunamadı, sayfa zaten geçmiş olabilir.");
-      return true; // CAPTCHA yok, devam et
+      console.log("  [CAPTCHA] Turnstile bulunamadı.");
+      return true;
     }
     return await _solve(page, altKey);
   }
-
   return await _solve(page, sitekey);
 }
 
 async function _solve(page, sitekey) {
   console.log(`  [CAPTCHA] Sitekey: ${sitekey.substring(0, 20)}...`);
-  console.log("  [CAPTCHA] 2captcha'ya gönderiliyor...");
-
   try {
     const solver = new (Solver.Solver || Solver)(CONFIG.CAPTCHA_API_KEY);
-    const result = await solver.cloudflareTurnstile({
-      pageurl: page.url(),
-      sitekey: sitekey,
-    });
-
+    const result = await solver.cloudflareTurnstile({ pageurl: page.url(), sitekey });
     const token = result.data;
     console.log("  [CAPTCHA] ✅ Çözüldü!");
-
-    // Token'ı sayfaya enjekte et
     await page.evaluate((t) => {
-      // Tüm olası input'lara yaz
-      const inputs = document.querySelectorAll(
+      document.querySelectorAll(
         'input[name="cf-turnstile-response"], input[name="g-recaptcha-response"], [name*="turnstile"]'
-      );
-      inputs.forEach((inp) => { inp.value = t; });
-
-      // Callback çağır
+      ).forEach((inp) => { inp.value = t; });
       if (typeof window.turnstileCallback === "function") window.turnstileCallback(t);
       if (typeof window.onTurnstileSuccess === "function") window.onTurnstileSuccess(t);
-      
-      // turnstile global objesinden callback bul
-      if (window.turnstile) {
-        try { window.turnstile.getResponse = () => t; } catch {}
-      }
+      if (window.turnstile) { try { window.turnstile.getResponse = () => t; } catch {} }
     }, token);
-
     await delay(1000, 2000);
     return true;
   } catch (err) {
@@ -212,11 +232,10 @@ async function _solve(page, sitekey) {
 
 // ==================== MAIN CHECK ====================
 
-async function checkAppointments(config) {
-  const { id, country, city, visa_category, applicants } = config;
+async function checkAppointments(config, account) {
+  const { id, country, city } = config;
   const ts = new Date().toLocaleTimeString("tr-TR");
-
-  console.log(`\n[${ts}] Kontrol: ${country} ${city}`);
+  console.log(`\n[${ts}] Kontrol: ${country} ${city} | Hesap: ${account.email}`);
 
   let browser;
   try {
@@ -236,13 +255,13 @@ async function checkAppointments(config) {
     });
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // ===== STEP 1: Giriş sayfası =====
-    console.log("  [1/5] Giriş sayfası...");
+    // STEP 1: Giriş sayfası
+    console.log("  [1/6] Giriş sayfası...");
     await page.goto(CONFIG.VFS_URL, { waitUntil: "networkidle2", timeout: 60000 });
     await delay(2000, 4000);
 
-    // ===== STEP 2: Cookie banner kapat =====
-    console.log("  [2/5] Cookie banner...");
+    // STEP 2: Cookie banner
+    console.log("  [2/6] Cookie banner...");
     try {
       const cookieBtn = await page.evaluateHandle(() => {
         const btns = [...document.querySelectorAll("button")];
@@ -253,51 +272,42 @@ async function checkAppointments(config) {
       });
       if (cookieBtn && cookieBtn.asElement()) {
         await cookieBtn.asElement().click();
-        console.log("  [2/5] ✅ Cookie kabul edildi.");
+        console.log("  [2/6] ✅ Cookie kabul edildi.");
         await delay(1000, 2000);
-      } else {
-        console.log("  [2/5] Cookie banner yok veya zaten kapatılmış.");
       }
-    } catch (e) {
-      console.log("  [2/5] Cookie banner bulunamadı, devam.");
-    }
+    } catch (e) {}
 
-    // ===== STEP 3: CAPTCHA / Waiting Room =====
-    console.log("  [3/5] CAPTCHA + sıra kontrol...");
+    // STEP 3: CAPTCHA + Queue
+    console.log("  [3/6] CAPTCHA + sıra kontrol...");
     await solveTurnstile(page);
     await delay(1000, 2000);
-
     const queueResult = await waitForLoginFormAfterQueue(page);
     if (!queueResult.ok) {
       const ss = await takeScreenshotBase64(page);
-      await reportResult(id, "error", `${queueResult.reason} | URL: ${page.url()}`, 0, ss);
-      return false;
+      await reportResult(id, "error", `${queueResult.reason} | Hesap: ${account.email}`, 0, ss);
+      return { found: false, accountBanned: false };
     }
 
-    // ===== STEP 4: Login =====
-    console.log("  [4/5] Giriş yapılıyor...");
+    // STEP 4: Login
+    console.log("  [4/6] Giriş yapılıyor...");
     try {
-      // Email
       await page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 20000 });
       await page.click('input[type="email"], input[name="email"], #email');
       await page.keyboard.down("Control");
       await page.keyboard.press("a");
       await page.keyboard.up("Control");
       await delay(100, 300);
-      for (const ch of CONFIG.VFS_EMAIL) {
+      for (const ch of account.email) {
         await page.keyboard.type(ch, { delay: Math.random() * 100 + 30 });
       }
       await delay(500, 1000);
-
-      // Password
       await page.click('input[type="password"]');
       await delay(200, 400);
-      for (const ch of CONFIG.VFS_PASSWORD) {
+      for (const ch of account.password) {
         await page.keyboard.type(ch, { delay: Math.random() * 100 + 30 });
       }
       await delay(500, 1000);
 
-      // Submit
       const submitBtn = await page.evaluateHandle(() => {
         const btns = [...document.querySelectorAll("button")];
         return btns.find((b) => {
@@ -305,39 +315,38 @@ async function checkAppointments(config) {
           return txt.includes("oturum") || txt.includes("sign in") || txt.includes("login") || txt.includes("giriş");
         }) || document.querySelector('button[type="submit"]') || null;
       });
-      
       if (submitBtn && submitBtn.asElement()) {
         await submitBtn.asElement().click();
-        console.log("  [4/5] Giriş butonu tıklandı.");
       } else {
         await page.click('button[type="submit"]');
-        console.log("  [4/5] Submit butonu tıklandı.");
       }
-
-      // Navigasyon bekle
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 }).catch(() => {});
       await delay(3000, 5000);
-
     } catch (loginErr) {
-      console.log("  [4/5] ⚠ Giriş formu hatası:", loginErr.message);
+      console.log("  [4/6] ⚠ Giriş formu hatası:", loginErr.message);
     }
 
-    // ===== LOGIN DOĞRULAMA =====
-    const currentUrl = page.url();
-    console.log("  [4/5] Mevcut URL:", currentUrl);
+    // STEP 5: OTP Doğrulama Kontrolü
+    console.log("  [5/6] OTP kontrol...");
+    const otpResult = await handleOtpVerification(page);
+    if (!otpResult.ok && otpResult.reason === "otp_required") {
+      console.log("  [5/6] ❌ OTP doğrulama gerekli - hesap beklemeye alınıyor");
+      await reportResult(id, "error", `OTP doğrulama gerekli | Hesap: ${account.email} | Manuel müdahale gerekli`, 0, otpResult.screenshot);
+      await updateAccountStatus(account.id, "cooldown", (account.fail_count || 0) + 1);
+      return { found: false, accountBanned: false, otpRequired: true };
+    }
 
-    // Sayfa içeriğinden hata/ban tespiti
+    // Login doğrulama
     const pageCheck = await page.evaluate(() => {
       const body = (document.body?.innerText || "").toLowerCase();
-      const title = (document.title || "").toLowerCase();
       const url = window.location.href.toLowerCase();
       return {
         title: document.title,
         url: window.location.href,
-        isNotFound: url.includes("page-not-found") || url.includes("not-found") || url.includes("404"),
-        isSessionExpired: body.includes("oturum süresi doldu") || body.includes("oturum süreniz") || body.includes("session expired") || body.includes("geçersiz"),
-        isBanned: body.includes("engellenmiş") || body.includes("blocked") || body.includes("banned") || body.includes("erişim engellendi"),
-        isWaitingRoom: title.includes("waiting room") || body.includes("şu anda sıradasınız"),
+        isNotFound: url.includes("page-not-found") || url.includes("404"),
+        isSessionExpired: body.includes("oturum süresi doldu") || body.includes("session expired"),
+        isBanned: body.includes("engellenmiş") || body.includes("blocked") || body.includes("banned"),
+        isWaitingRoom: (document.title || "").toLowerCase().includes("waiting room"),
         isLoginPage: url.includes("/login"),
         isDashboard: url.includes("/dashboard") || url.includes("/appointment"),
         hasLoginForm: !!document.querySelector('input[type="email"], input[name="email"], #email'),
@@ -345,100 +354,95 @@ async function checkAppointments(config) {
       };
     });
 
-    // Hata durumları kontrol
-    const isError = pageCheck.isNotFound || pageCheck.isSessionExpired || pageCheck.isBanned || pageCheck.isWaitingRoom;
+    const isBanned = pageCheck.isBanned;
+    const isError = pageCheck.isNotFound || pageCheck.isSessionExpired || isBanned || pageCheck.isWaitingRoom;
     const isLoginFailed = pageCheck.isLoginPage || pageCheck.hasLoginForm;
 
     if (isError || (isLoginFailed && !pageCheck.isDashboard)) {
       let errorType = "Bilinmeyen hata";
-      if (pageCheck.isNotFound) errorType = "❌ Sayfa bulunamadı (404) - VFS yönlendirmesi başarısız";
-      else if (pageCheck.isSessionExpired) errorType = "❌ Oturum süresi dolmuş veya geçersiz - hesap banlanmış olabilir";
-      else if (pageCheck.isBanned) errorType = "❌ Hesap engellenmiş!";
+      if (isBanned) errorType = "❌ Hesap engellenmiş!";
+      else if (pageCheck.isNotFound) errorType = "❌ Sayfa bulunamadı (404)";
+      else if (pageCheck.isSessionExpired) errorType = "❌ Oturum süresi dolmuş";
       else if (pageCheck.isWaitingRoom) errorType = "❌ Hala waiting room'da";
-      else if (isLoginFailed) errorType = "❌ Giriş başarısız - hala login sayfasında";
+      else if (isLoginFailed) errorType = "❌ Giriş başarısız";
 
-      console.log(`  [4/5] ${errorType}`);
-      console.log(`  [DIAG] Title: ${pageCheck.title}`);
-      console.log(`  [DIAG] URL: ${pageCheck.url}`);
-      console.log(`  [DIAG] İçerik: ${pageCheck.bodySnippet.substring(0, 150)}...`);
+      console.log(`  [5/6] ${errorType} | Hesap: ${account.email}`);
 
       const ss = await takeScreenshotBase64(page);
-      await reportResult(id, "error", `${errorType} | URL: ${pageCheck.url}`, 0, ss);
-      return false;
+      await reportResult(id, "error", `${errorType} | Hesap: ${account.email}`, 0, ss);
+
+      if (isBanned) {
+        await updateAccountStatus(account.id, "banned");
+        return { found: false, accountBanned: true };
+      }
+
+      // Giriş başarısız - fail count artır
+      const newFailCount = (account.fail_count || 0) + 1;
+      if (newFailCount >= 3) {
+        console.log(`  [ACCOUNT] ${account.email} - 3 başarısız giriş, beklemeye alınıyor`);
+        await updateAccountStatus(account.id, "cooldown", newFailCount);
+      } else {
+        await updateAccountStatus(account.id, "active", newFailCount);
+      }
+      return { found: false, accountBanned: false };
     }
 
-    console.log("  [4/5] ✅ Giriş başarılı! Dashboard'a yönlendirildi.");
+    console.log("  [5/6] ✅ Giriş başarılı!");
+    // Başarılı giriş - fail count sıfırla
+    await updateAccountStatus(account.id, "active", 0);
 
-    // ===== STEP 5: Randevu kontrol =====
-    console.log("  [5/5] Randevu kontrol...");
+    // STEP 6: Randevu kontrol
+    console.log("  [6/6] Randevu kontrol...");
     await delay(2000, 3000);
-
-    // Dashboard'dan randevu sayfasına git
-    // VFS Global yapısı: /tur/tr/fra/dashboard -> appointment bölümü
     try {
-      // "Yeni Başvuru" / "Start New Booking" butonu ara
       const bookBtn = await page.evaluateHandle(() => {
         const links = [...document.querySelectorAll("a, button")];
         return links.find((el) => {
           const txt = (el.textContent || "").toLowerCase();
-          return txt.includes("new booking") || txt.includes("yeni başvuru") || 
+          return txt.includes("new booking") || txt.includes("yeni başvuru") ||
                  txt.includes("start new") || txt.includes("randevu") ||
                  txt.includes("book appointment");
         }) || null;
       });
-
       if (bookBtn && bookBtn.asElement()) {
         await bookBtn.asElement().click();
-        console.log("  [5/5] Randevu sayfasına tıklandı.");
         await delay(3000, 5000);
-        
-        // İkinci CAPTCHA olabilir
         await solveTurnstile(page);
         await delay(2000, 3000);
-      } else {
-        console.log("  [5/5] Randevu butonu bulunamadı, mevcut sayfada kontrol ediliyor.");
       }
-    } catch (navErr) {
-      console.log("  [5/5] Navigasyon hatası:", navErr.message);
-    }
+    } catch (navErr) {}
 
-    // Sayfa içeriğini oku
     const bodyText = await page.evaluate(() => document.body.innerText);
     const lowerText = bodyText.toLowerCase();
-
     const noAppointmentPhrases = [
       "no appointment", "no available", "currently no date",
       "randevu bulunmamaktadır", "müsait randevu yok", "no open schedule",
       "fully booked", "no slot", "appointment is not available",
       "no dates available", "no timeslot available",
     ];
-
     const appointmentFoundPhrases = [
       "select date", "available slot", "tarih seçin",
       "available appointment", "open slot", "choose a date",
       "select a time", "appointment available",
     ];
-
     const noAppointment = noAppointmentPhrases.some((p) => lowerText.includes(p));
     const hasAppointment = appointmentFoundPhrases.some((p) => lowerText.includes(p));
-
     const ss = await takeScreenshotBase64(page);
 
     if (hasAppointment && !noAppointment) {
       console.log("  ✅ RANDEVU BULUNDU!");
-      await reportResult(id, "found", "Randevu müsait! Hemen giriş yapın.", 1, ss);
-      return true;
+      await reportResult(id, "found", `Randevu müsait! Hesap: ${account.email}`, 1, ss);
+      return { found: true, accountBanned: false };
     } else {
       console.log("  ❌ Randevu yok.");
       const msg = noAppointment ? "Müsait randevu yok." : "Dashboard yüklendi, randevu yok.";
-      await reportResult(id, "checking", msg, 0, ss);
-      return false;
+      await reportResult(id, "checking", `${msg} | Hesap: ${account.email}`, 0, ss);
+      return { found: false, accountBanned: false };
     }
-
   } catch (err) {
     console.error("  [!] Genel hata:", err.message);
-    await reportResult(id, "error", `Bot hatası: ${err.message}`);
-    return false;
+    await reportResult(id, "error", `Bot hatası: ${err.message} | Hesap: ${account.email}`);
+    return { found: false, accountBanned: false };
   } finally {
     if (browser) await browser.close();
   }
@@ -448,13 +452,9 @@ async function checkAppointments(config) {
 
 async function main() {
   console.log("═══════════════════════════════════════════");
-  console.log("  VFS Randevu Takip Botu v4");
+  console.log("  VFS Randevu Takip Botu v5");
+  console.log("  Çoklu Hesap + OTP Desteği");
   console.log("═══════════════════════════════════════════");
-
-  if (!CONFIG.VFS_EMAIL || !CONFIG.VFS_PASSWORD) {
-    console.error("❌ VFS_EMAIL ve VFS_PASSWORD .env'de tanımlanmalı!");
-    process.exit(1);
-  }
 
   if (CONFIG.CAPTCHA_API_KEY) {
     console.log("✅ CAPTCHA çözücü aktif");
@@ -462,9 +462,17 @@ async function main() {
     console.log("⚠ CAPTCHA_API_KEY yok, Turnstile çözülemeyecek!");
   }
 
+  let accountIndex = 0;
+
   while (true) {
     try {
-      const configs = await fetchActiveConfigs();
+      const { configs, accounts } = await fetchActiveConfigs();
+
+      if (accounts.length === 0) {
+        console.log("\n❌ Kullanılabilir VFS hesabı yok! Dashboard'dan hesap ekleyin.");
+        await new Promise((r) => setTimeout(r, 30000));
+        continue;
+      }
 
       if (configs.length === 0) {
         console.log("\n⏸ Aktif görev yok. 60s sonra tekrar...");
@@ -472,9 +480,22 @@ async function main() {
         continue;
       }
 
+      console.log(`\n📊 ${accounts.length} aktif hesap, ${configs.length} aktif görev`);
+
       for (const config of configs) {
-        const found = await checkAppointments(config);
-        if (found) console.log("\n🎉 RANDEVU BULUNDU! Dashboard'u kontrol edin!");
+        // Hesap seç (round-robin)
+        const account = accounts[accountIndex % accounts.length];
+        accountIndex++;
+
+        const result = await checkAppointments(config, account);
+
+        if (result.found) {
+          console.log("\n🎉 RANDEVU BULUNDU! Dashboard'u kontrol edin!");
+        }
+
+        if (result.accountBanned) {
+          console.log(`\n⛔ Hesap banlı: ${account.email} - sonraki hesaba geçiliyor`);
+        }
 
         const interval = (config.check_interval || 120) * 1000;
         const jitter = Math.floor(Math.random() * 30000);
