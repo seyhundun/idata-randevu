@@ -746,36 +746,43 @@ async function checkAppointments(config, account) {
 // ==================== REGISTRATION ====================
 async function fetchPendingRegistrations() {
   try {
-    const res = await fetch(CONFIG.API_URL, { method: "POST", headers: apiHeaders,
-      body: JSON.stringify({ action: "get_pending_registrations" }) });
-    const data = await res.json();
+    const data = await apiPost({ action: "get_pending_registrations" }, "get_pending_registrations");
     return data.ok ? (data.accounts || []) : [];
-  } catch (err) { console.error("  [REG] Kayıt listesi hatası:", err.message); return []; }
+  } catch (err) {
+    console.error("  [REG] Kayıt listesi hatası:", err.message);
+    return [];
+  }
 }
 
 async function setRegistrationOtpNeeded(accountId, otpType) {
   try {
-    await fetch(CONFIG.API_URL, { method: "POST", headers: apiHeaders,
-      body: JSON.stringify({ action: "set_registration_otp_needed", account_id: accountId, otp_type: otpType }) });
+    await apiPost(
+      { action: "set_registration_otp_needed", account_id: accountId, otp_type: otpType },
+      "set_registration_otp_needed"
+    );
     console.log(`  [REG] 📱 ${otpType.toUpperCase()} doğrulama kodu bekleniyor`);
-  } catch (err) { console.error("  [REG] OTP istek hatası:", err.message); }
+  } catch (err) {
+    console.error("  [REG] OTP istek hatası:", err.message);
+  }
 }
 
 async function getRegistrationOtp(accountId) {
   try {
-    const res = await fetch(CONFIG.API_URL, { method: "POST", headers: apiHeaders,
-      body: JSON.stringify({ action: "get_registration_otp", account_id: accountId }) });
-    const data = await res.json();
+    const data = await apiPost({ action: "get_registration_otp", account_id: accountId }, "get_registration_otp");
     return data.registration_otp || null;
-  } catch (err) { console.error("  [REG] OTP okuma hatası:", err.message); return null; }
+  } catch (err) {
+    console.error("  [REG] OTP okuma hatası:", err.message);
+    return null;
+  }
 }
 
 async function completeRegistration(accountId, success) {
   try {
-    await fetch(CONFIG.API_URL, { method: "POST", headers: apiHeaders,
-      body: JSON.stringify({ action: "complete_registration", account_id: accountId, success }) });
+    await apiPost({ action: "complete_registration", account_id: accountId, success }, "complete_registration");
     console.log(`  [REG] Kayıt ${success ? "✅ başarılı" : "❌ başarısız"}`);
-  } catch (err) { console.error("  [REG] Kayıt sonuç hatası:", err.message); }
+  } catch (err) {
+    console.error("  [REG] Kayıt sonuç hatası:", err.message);
+  }
 }
 
 async function waitForRegistrationOtp(accountId, otpType, timeoutMs = 180000) {
