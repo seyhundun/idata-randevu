@@ -84,6 +84,56 @@ async function takeScreenshotBase64(page) {
   } catch { return null; }
 }
 
+async function isWaitingRoomPage(page) {
+  return await page.evaluate(() => {
+    const title = (document.title || "").toLowerCase();
+    const body = (document.body?.innerText || "").toLowerCase();
+    return (
+      title.includes("waiting room") ||
+      body.includes("şu anda sıradasınız") ||
+      body.includes("tahmini bekleme süreniz") ||
+      body.includes("this page will auto refresh") ||
+      body.includes("bu sayfa otomatik olarak yenilenecektir")
+    );
+  });
+}
+
+async function waitForLoginFormAfterQueue(page) {
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAt < CONFIG.QUEUE_MAX_WAIT_MS) {
+    attempt += 1;
+
+    const emailInput = await page.$('input[type="email"], input[name="email"], #email');
+    if (emailInput) {
+      console.log(`  [QUEUE] ✅ Login formu hazır (${attempt}. deneme).`);
+      return { ok: true };
+    }
+
+    const waitingRoom = await isWaitingRoomPage(page);
+    if (waitingRoom) {
+      const waitedSec = Math.round((Date.now() - startedAt) / 1000);
+      console.log(`  [QUEUE] Sırada bekleniyor... ${waitedSec}s`);
+
+      await solveTurnstile(page);
+
+      if (attempt % 3 === 0) {
+        await page.reload({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+      } else {
+        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: CONFIG.QUEUE_POLL_MS }).catch(() => {});
+      }
+
+      await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 1200);
+      continue;
+    }
+
+    await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 1200);
+  }
+
+  return { ok: false, reason: `Waiting room timeout (${Math.round(CONFIG.QUEUE_MAX_WAIT_MS / 1000)}s)` };
+}
+
 // ==================== CAPTCHA ====================
 
 async function solveTurnstile(page) {
