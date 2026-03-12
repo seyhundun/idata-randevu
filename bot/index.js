@@ -232,13 +232,19 @@ async function handleOtpVerification(page, account) {
   console.log("  [OTP] ⚠ Doğrulama kodu isteniyor!");
   const ss = await takeScreenshotBase64(page);
 
-  // IMAP ile OTP okumayı dene
+  // Dashboard'a OTP beklendiğini bildir (SMS için)
+  await setOtpRequested(account.id);
+
+  // IMAP + Manuel OTP okumayı dene
   const startTime = Date.now();
   const maxWait = CONFIG.OTP_WAIT_MS; // 2dk
   const pollInterval = CONFIG.OTP_POLL_MS; // 5sn
   
   while (Date.now() - startTime < maxWait) {
-    const otp = await readOtpFromEmail(account.id);
+    // Önce manuel OTP kontrol et (SMS durumu)
+    let otp = await readManualOtp(account.id);
+    // Manuel yoksa IMAP dene
+    if (!otp) otp = await readOtpFromEmail(account.id);
     
     if (otp) {
       // OTP'yi sayfadaki input'a yaz
