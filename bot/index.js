@@ -262,17 +262,24 @@ async function checkAppointments(config) {
       console.log("  [2/5] Cookie banner bulunamadı, devam.");
     }
 
-    // ===== STEP 3: CAPTCHA çöz =====
-    console.log("  [3/5] CAPTCHA kontrol...");
+    // ===== STEP 3: CAPTCHA / Waiting Room =====
+    console.log("  [3/5] CAPTCHA + sıra kontrol...");
     await solveTurnstile(page);
     await delay(1000, 2000);
+
+    const queueResult = await waitForLoginFormAfterQueue(page);
+    if (!queueResult.ok) {
+      const ss = await takeScreenshotBase64(page);
+      await reportResult(id, "error", `${queueResult.reason} | URL: ${page.url()}`, 0, ss);
+      return false;
+    }
 
     // ===== STEP 4: Login =====
     console.log("  [4/5] Giriş yapılıyor...");
     try {
       // Email
-      await page.waitForSelector('input[type="email"]', { timeout: 10000 });
-      await page.click('input[type="email"]');
+      await page.waitForSelector('input[type="email"], input[name="email"], #email', { timeout: 20000 });
+      await page.click('input[type="email"], input[name="email"], #email');
       await page.keyboard.down("Control");
       await page.keyboard.press("a");
       await page.keyboard.up("Control");
