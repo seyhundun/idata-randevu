@@ -183,6 +183,16 @@ export default function VfsAccounts() {
                     {showPasswords[acc.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
+                {acc.imap_password && (
+                  <span className="text-xs text-emerald-600 flex items-center gap-1 mt-0.5">
+                    <Mail className="w-3 h-3" /> IMAP: {acc.imap_host || "imap.gmail.com"}
+                  </span>
+                )}
+                {!acc.imap_password && (
+                  <span className="text-xs text-amber-500 flex items-center gap-1 mt-0.5">
+                    <Mail className="w-3 h-3" /> IMAP yapılandırılmadı
+                  </span>
+                )}
                 {acc.fail_count > 0 && (
                   <span className="text-xs text-destructive">Başarısız giriş: {acc.fail_count}</span>
                 )}
