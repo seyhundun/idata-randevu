@@ -132,6 +132,30 @@ export default function VfsAccounts() {
             />
           </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs flex items-center gap-1"><Mail className="w-3 h-3" /> IMAP Sunucu</Label>
+            <Input
+              type="text"
+              placeholder="imap.gmail.com"
+              value={newImapHost}
+              onChange={(e) => setNewImapHost(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs flex items-center gap-1"><Mail className="w-3 h-3" /> IMAP / App Şifre</Label>
+            <Input
+              type="password"
+              placeholder="Gmail App Password"
+              value={newImapPassword}
+              onChange={(e) => setNewImapPassword(e.target.value)}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          OTP otomatik okuma için IMAP bilgilerini girin. Gmail kullanıyorsanız{" "}
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" className="text-primary underline">App Password</a> oluşturun.
+        </p>
         <Button onClick={addAccount} disabled={loading} size="sm" className="gap-1.5">
           <Plus className="w-4 h-4" /> Hesap Ekle
         </Button>
