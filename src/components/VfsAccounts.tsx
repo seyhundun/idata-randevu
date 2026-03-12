@@ -19,6 +19,8 @@ interface VfsAccount {
   notes: string | null;
   imap_host: string | null;
   imap_password: string | null;
+  manual_otp: string | null;
+  otp_requested_at: string | null;
 }
 
 export default function VfsAccounts() {
