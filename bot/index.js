@@ -1154,6 +1154,32 @@ async function getRegistrationFormDiagnostics(page) {
   });
 }
 
+async function tryForceRegistrationSubmit(page) {
+  return await page.evaluate(() => {
+    const keywords = ["devam et", "devam", "continue", "register", "create", "kayıt", "oluştur", "sign up"];
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const submitBtn = buttons.find((b) => {
+      const txt = (b.textContent || "").toLowerCase().trim();
+      return keywords.some((k) => txt.includes(k));
+    }) || document.querySelector('button[type="submit"]');
+
+    if (!submitBtn) return { clicked: false, forced: false, reason: "no_submit_button" };
+
+    const wasDisabled = !!submitBtn.disabled;
+    if (wasDisabled) {
+      submitBtn.disabled = false;
+      submitBtn.removeAttribute("disabled");
+      submitBtn.setAttribute("aria-disabled", "false");
+    }
+
+    const form = submitBtn.closest("form");
+    if (form && typeof form.requestSubmit === "function") form.requestSubmit(submitBtn);
+    else submitBtn.click();
+
+    return { clicked: true, forced: wasDisabled, reason: wasDisabled ? "force_enabled" : "normal_click" };
+  });
+}
+
 async function postRegError(account, page, reason) {
   try {
     let screenshotBase64 = null;
