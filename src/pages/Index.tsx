@@ -2,6 +2,7 @@ import ControlPanel from "@/components/ControlPanel";
 import StatusPanel from "@/components/StatusPanel";
 import ApplicantList from "@/components/ApplicantList";
 import TrackingLogs from "@/components/TrackingLogs";
+import VfsAccounts from "@/components/VfsAccounts";
 import { useTracking } from "@/hooks/useTracking";
 
 const Index = () => {
