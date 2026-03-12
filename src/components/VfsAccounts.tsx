@@ -76,8 +76,6 @@ export default function VfsAccounts() {
       toast.success("VFS hesabı eklendi");
       setNewEmail("");
       setNewPassword("");
-      setNewImapHost("imap.gmail.com");
-      setNewImapPassword("");
       loadAccounts();
     }
     setLoading(false);
