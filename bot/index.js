@@ -1140,6 +1140,16 @@ async function main() {
 
   while (true) {
     try {
+      // Check for pending registrations first
+      const pendingRegs = await fetchPendingRegistrations();
+      if (pendingRegs.length > 0) {
+        console.log(`\n📝 ${pendingRegs.length} bekleyen kayıt var`);
+        for (const reg of pendingRegs) {
+          await registerVfsAccount(reg);
+          await delay(10000, 20000);
+        }
+      }
+
       const { configs, accounts } = await fetchActiveConfigs();
 
       if (accounts.length === 0) {
