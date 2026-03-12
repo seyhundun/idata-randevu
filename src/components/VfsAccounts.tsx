@@ -8,22 +8,40 @@ import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Plus, Trash2, Eye, EyeOff, UserCheck, Ban, Clock, MessageSquare, Send, UserPlus, Mail, Phone, Loader2, RefreshCw } from "lucide-react";
 
+const VFS_PASSWORD_SPECIAL = "$@#!%*?";
+const VFS_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[$@#!%*?])[A-Za-z\d$@#!%*?]{8,15}$/;
+
+function validateVfsPassword(pw: string): string | null {
+  if (pw.length < 8) return "En az 8 karakter olmalı";
+  if (pw.length > 15) return "En fazla 15 karakter olmalı";
+  if (!/[A-Z]/.test(pw)) return "En az 1 büyük harf gerekli";
+  if (!/[a-z]/.test(pw)) return "En az 1 küçük harf gerekli";
+  if (!/\d/.test(pw)) return "En az 1 sayı gerekli";
+  if (!/[$@#!%*?]/.test(pw)) return "En az 1 özel karakter gerekli ( $ @ # ! % * ? )";
+  if (/[^A-Za-z\d$@#!%*?]/.test(pw)) return "Sadece harf, rakam ve $ @ # ! % * ? kullanılabilir";
+  return null;
+}
+
 function generateSecurePassword(): string {
   const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const lower = "abcdefghijklmnopqrstuvwxyz";
   const digits = "0123456789";
-  const special = "!@#$%&*?";
-  const all = upper + lower + digits + special;
-  
-  // Ensure at least one of each type
+  const all = upper + lower + digits + VFS_PASSWORD_SPECIAL;
+
+  // Length between 10-14 (safe range within 8-15)
+  const length = 10 + Math.floor(Math.random() * 5);
+
+  // Ensure at least one of each required type
   const required = [
     upper[Math.floor(Math.random() * upper.length)],
+    upper[Math.floor(Math.random() * upper.length)],
+    lower[Math.floor(Math.random() * lower.length)],
     lower[Math.floor(Math.random() * lower.length)],
     digits[Math.floor(Math.random() * digits.length)],
-    special[Math.floor(Math.random() * special.length)],
+    VFS_PASSWORD_SPECIAL[Math.floor(Math.random() * VFS_PASSWORD_SPECIAL.length)],
   ];
-  
-  const remaining = Array.from({ length: 8 }, () => all[Math.floor(Math.random() * all.length)]);
+
+  const remaining = Array.from({ length: length - required.length }, () => all[Math.floor(Math.random() * all.length)]);
   const chars = [...required, ...remaining];
   // Shuffle
   for (let i = chars.length - 1; i > 0; i--) {
@@ -83,6 +101,11 @@ export default function VfsAccounts() {
   const addAccount = async () => {
     if (!newEmail || !newPassword) {
       toast.error("Email ve şifre gerekli");
+      return;
+    }
+    const pwError = validateVfsPassword(newPassword);
+    if (pwError) {
+      toast.error("Şifre uygun değil: " + pwError);
       return;
     }
     setLoading(true);
@@ -254,8 +277,20 @@ export default function VfsAccounts() {
               type={newPassword && addMode === "register" ? "text" : "password"}
               placeholder="••••••••"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value.replace(/[^A-Za-z\d$@#!%*?]/g, "").slice(0, 15);
+                setNewPassword(val);
+              }}
+              maxLength={15}
             />
+            {newPassword && (() => {
+              const err = validateVfsPassword(newPassword);
+              return err ? (
+                <p className="text-[10px] text-destructive mt-0.5">{err}</p>
+              ) : (
+                <p className="text-[10px] text-green-600 mt-0.5">✓ Şifre uygun</p>
+              );
+            })()}
           </div>
           {addMode === "register" && (
             <div>
