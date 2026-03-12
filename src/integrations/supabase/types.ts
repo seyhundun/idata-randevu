@@ -151,6 +151,8 @@ export type Database = {
           email: string
           fail_count: number
           id: string
+          imap_host: string | null
+          imap_password: string | null
           last_used_at: string | null
           notes: string | null
           password: string
@@ -163,6 +165,8 @@ export type Database = {
           email: string
           fail_count?: number
           id?: string
+          imap_host?: string | null
+          imap_password?: string | null
           last_used_at?: string | null
           notes?: string | null
           password: string
@@ -175,6 +179,8 @@ export type Database = {
           email?: string
           fail_count?: number
           id?: string
+          imap_host?: string | null
+          imap_password?: string | null
           last_used_at?: string | null
           notes?: string | null
           password?: string
