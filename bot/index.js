@@ -1063,12 +1063,15 @@ async function registerVfsAccount(account) {
     // 1. Email field
     const emailInput = await page.$('input[type="email"], input[placeholder*="email"], input[name*="email"]');
     if (emailInput) {
-      await emailInput.click();
-      await delay(300, 600);
-      for (const ch of account.email) {
-        await page.keyboard.type(ch, { delay: Math.random() * 120 + 30 });
-      }
-      await delay(500, 1000);
+      await humanType(page, emailInput, account.email, {
+        clearFirst: true,
+        minDelay: 80,
+        maxDelay: 240,
+        pauseChance: 0.18,
+        pauseMin: 280,
+        pauseMax: 1200,
+      });
+      await delay(500, 1100);
     }
     await humanMove(page);
 
@@ -1076,66 +1079,71 @@ async function registerVfsAccount(account) {
     const passwordInputs = await page.$$('input[type="password"]');
     console.log(`  [REG] ${passwordInputs.length} şifre alanı bulundu`);
     for (let i = 0; i < passwordInputs.length; i++) {
-      await passwordInputs[i].click();
-      await delay(300, 600);
-      for (const ch of account.password) {
-        await page.keyboard.type(ch, { delay: Math.random() * 120 + 30 });
-      }
-      await delay(500, 1000);
+      await humanType(page, passwordInputs[i], account.password, {
+        clearFirst: true,
+        minDelay: 85,
+        maxDelay: 230,
+        pauseChance: 0.15,
+        pauseMin: 240,
+        pauseMax: 900,
+      });
+      await delay(450, 1000);
       if (i === 0) await humanMove(page);
     }
-    await delay(500, 1000);
+    await delay(700, 1300);
 
     // 3. Mobile Number - Dial Code dropdown + Mobile Number field
     if (account.phone) {
-      // Parse phone: expect format like +905XXXXXXXXX or 5XXXXXXXXX
-      let dialCode = "90";
-      let mobileNumber = account.phone;
-      
-      // Remove + prefix
-      if (mobileNumber.startsWith("+")) mobileNumber = mobileNumber.substring(1);
-      // If starts with country code 90, split it
-      if (mobileNumber.startsWith("90") && mobileNumber.length > 10) {
-        dialCode = "90";
-        mobileNumber = mobileNumber.substring(2);
-      }
-      // Remove leading 0 if present (VFS says "without prefix(0)")
-      if (mobileNumber.startsWith("0")) mobileNumber = mobileNumber.substring(1);
-
+      const { dialCode, mobileNumber } = normalizePhoneNumber(account.phone);
       console.log(`  [REG] Telefon: +${dialCode} ${mobileNumber}`);
 
-      // Select dial code from dropdown
-      try {
-        const dialCodeSelect = await page.$('select');
-        if (dialCodeSelect) {
-          await dialCodeSelect.select(dialCode);
-          await delay(300, 600);
-        }
-      } catch (e) {
-        console.log("  [REG] Dial code dropdown bulunamadı, varsayılan kullanılacak");
+      const dialCodeSelected = await selectTurkeyDialCode(page);
+      if (!dialCodeSelected) {
+        throw new Error("Dial code Turkey(90) seçilemedi");
       }
 
-      // Fill mobile number (input after dial code, usually input[type="tel"] or text input near "mobile")
       const mobileInput = await page.evaluateHandle(() => {
-        // Look for the mobile number input (not the dial code)
-        const inputs = [...document.querySelectorAll('input[type="tel"], input[type="text"], input[type="number"]')];
-        return inputs.find(inp => {
-          const name = (inp.name || "").toLowerCase();
-          const id = (inp.id || "").toLowerCase();
-          const placeholder = (inp.placeholder || "").toLowerCase();
-          const label = inp.closest("div")?.textContent?.toLowerCase() || "";
-          return name.includes("mobile") || name.includes("phone") || name.includes("tel") ||
-                 id.includes("mobile") || id.includes("phone") ||
-                 placeholder.includes("mobile") || label.includes("mobile number");
-        }) || null;
+        const isVisible = (el) => {
+          if (!el) return false;
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+        };
+
+        const scoreInput = (inp) => {
+          const meta = `${inp.name || ""} ${inp.id || ""} ${inp.placeholder || ""} ${inp.getAttribute("aria-label") || ""}`.toLowerCase();
+          const sectionText = (inp.closest("mat-form-field, .mat-mdc-form-field, .form-group, .row, div")?.textContent || "").toLowerCase();
+
+          if (/otp|code|verify|email|mail|password|şifre/.test(meta)) return -10;
+
+          let score = 0;
+          if (/mobile|phone|tel|gsm|cep|telefon/.test(meta)) score += 5;
+          if (/mobile number|phone number|telefon numarası|cep numarası|cep telefonu|ön ek olmadan/.test(sectionText)) score += 4;
+          if (inp.type === "tel") score += 3;
+          return score;
+        };
+
+        const candidates = Array.from(document.querySelectorAll('input[type="tel"], input[type="text"], input[type="number"]'))
+          .filter((inp) => isVisible(inp) && !inp.disabled && !inp.readOnly)
+          .map((inp) => ({ inp, score: scoreInput(inp) }))
+          .filter((item) => item.score > 0)
+          .sort((a, b) => b.score - a.score);
+
+        return candidates[0]?.inp || null;
       });
+
       if (mobileInput && mobileInput.asElement()) {
-        await mobileInput.asElement().click();
-        await delay(300, 600);
-        for (const ch of mobileNumber) {
-          await page.keyboard.type(ch, { delay: Math.random() * 120 + 30 });
-        }
-        await delay(500, 1000);
+        await humanType(page, mobileInput.asElement(), mobileNumber, {
+          clearFirst: true,
+          minDelay: 90,
+          maxDelay: 250,
+          pauseChance: 0.12,
+          pauseMin: 220,
+          pauseMax: 800,
+        });
+        await delay(500, 1100);
+      } else {
+        throw new Error("Telefon numarası alanı bulunamadı");
       }
     }
     await humanMove(page);
