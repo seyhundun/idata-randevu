@@ -1024,6 +1024,7 @@ async function checkAppointments(config, account) {
       console.log(`  [IP] 🚫 Sayfa yüklenemedi / engellendi! IP: ${activeIp}`);
       markIpFail(activeIp);
       const ss = await takeScreenshotBase64(page);
+      await logStep(id, "network_error", `IP engellendi: ${activeIp || "doğrudan"}`);
       await reportResult(id, "error", `IP engellendi: ${activeIp || "doğrudan"} | Hesap: ${account.email}`, 0, ss);
       const nextIp = getNextIp();
       return { found: false, accountBanned: false, ipBlocked: true };
