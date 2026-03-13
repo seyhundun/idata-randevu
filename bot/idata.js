@@ -1114,12 +1114,12 @@ async function mainLoop() {
             
             // Randevu kontrol
             await idataLog("appt_check", `Randevu kontrol ediliyor | Hesap: ${account.email}`);
-            const apptResult = await checkAppointments(page);
+            const apptResult = await checkAppointments(page, account);
             
             if (apptResult.found) {
               await idataLog("appt_found", `🎉 RANDEVU BULUNDU! | Hesap: ${account.email}`, apptResult.screenshot);
             } else {
-              await idataLog("appt_none", `Randevu yok | Hesap: ${account.email}`, apptResult.screenshot);
+              await idataLog("appt_none", `Randevu yok | ${apptResult.message || ""} | Hesap: ${account.email}`, apptResult.screenshot);
             }
           } else {
             const reason = loginResult.reason ? ` | Sebep: ${loginResult.reason}` : "";
