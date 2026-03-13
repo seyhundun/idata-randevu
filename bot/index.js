@@ -285,6 +285,7 @@ async function waitForLoginFormAfterQueue(page) {
 async function waitForRegistrationFormAfterQueue(page) {
   const startedAt = Date.now();
   let attempt = 0;
+  let lastScreenshotAt = 0;
 
   while (Date.now() - startedAt < CONFIG.QUEUE_MAX_WAIT_MS) {
     attempt++;
@@ -317,9 +318,13 @@ async function waitForRegistrationFormAfterQueue(page) {
     }
 
     const waitingRoom = await isWaitingRoomPage(page);
+    const waitedSec = Math.round((Date.now() - startedAt) / 1000);
     if (waitingRoom) {
-      const waitedSec = Math.round((Date.now() - startedAt) / 1000);
       console.log(`  [REG] Sırada bekleniyor... ${waitedSec}s`);
+      if (Date.now() - lastScreenshotAt > 30000) {
+        await postQueueScreenshot(page, "REG-QUEUE", waitedSec);
+        lastScreenshotAt = Date.now();
+      }
       await solveTurnstile(page);
       await page.waitForNavigation({ waitUntil: "networkidle2", timeout: CONFIG.QUEUE_POLL_MS + 5000 }).catch(() => {});
       await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 3000);
@@ -337,6 +342,11 @@ async function waitForRegistrationFormAfterQueue(page) {
           if (acceptBtn) acceptBtn.click();
         });
       } catch {}
+
+      if (Date.now() - lastScreenshotAt > 30000) {
+        await postQueueScreenshot(page, "REG-QUEUE", waitedSec);
+        lastScreenshotAt = Date.now();
+      }
     }
 
     if (attempt % 6 === 0) {
