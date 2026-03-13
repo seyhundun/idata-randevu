@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Plus, Trash2, Eye, EyeOff, UserCheck, Ban, Clock, UserPlus, Loader2, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, UserCheck, Ban, Clock, UserPlus, Loader2, RefreshCw, Pencil } from "lucide-react";
 
 const IDATA_PASSWORD_SPECIAL = "@$!%*#?&";
 
@@ -69,6 +69,7 @@ export default function IdataAccounts() {
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [cityOffices, setCityOffices] = useState<CityOffice[]>([]);
   const [availableCities, setAvailableCities] = useState<string[]>([]);
   const [filteredOffices, setFilteredOffices] = useState<CityOffice[]>([]);
@@ -131,29 +132,74 @@ export default function IdataAccounts() {
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
-  const addAccount = async () => {
-    if (!form.email || !form.password || !form.first_name || !form.last_name) {
-      toast.error("Email, şifre, isim ve soyisim gerekli");
+  const loadToForm = (acc: IdataAccount) => {
+    setForm({
+      email: acc.email || "",
+      password: acc.password || "",
+      first_name: acc.first_name || "",
+      last_name: acc.last_name || "",
+      passport_no: acc.passport_no || "",
+      phone: acc.phone || "",
+      birth_day: acc.birth_day || "01",
+      birth_month: acc.birth_month || "01",
+      birth_year: acc.birth_year || "1990",
+      residence_city: acc.residence_city || "",
+      idata_office: acc.idata_office || "",
+      travel_purpose: acc.travel_purpose || "",
+      invoice_city: acc.invoice_city || "",
+      invoice_district: acc.invoice_district || "",
+      invoice_address: acc.invoice_address || "",
+    });
+    setEditingId(acc.id);
+    setShowForm(true);
+  };
+
+  const resetForm = () => {
+    setForm({
+      email: "", password: generateSecurePassword(),
+      first_name: "", last_name: "", passport_no: "",
+      phone: "", birth_day: "01", birth_month: "01", birth_year: "1990",
+      residence_city: "", idata_office: "", travel_purpose: "",
+      invoice_city: "", invoice_district: "", invoice_address: "",
+    });
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  const saveAccount = async () => {
+    if (!form.first_name || !form.last_name) {
+      toast.error("İsim ve soyisim gerekli");
       return;
     }
     setLoading(true);
-    const { error } = await supabase.from("idata_accounts" as any).insert({
-      ...form,
-      registration_status: "pending",
-      status: "active",
-    } as any);
-    if (error) {
-      toast.error("Hesap eklenemedi: " + error.message);
+
+    if (editingId) {
+      const { error } = await supabase.from("idata_accounts" as any)
+        .update(form as any)
+        .eq("id", editingId);
+      if (error) {
+        toast.error("Güncelleme başarısız: " + error.message);
+      } else {
+        toast.success("Hesap güncellendi!");
+        resetForm();
+      }
     } else {
-      toast.success("iDATA kayıt talebi oluşturuldu!");
-      setForm({
-        email: "", password: generateSecurePassword(),
-        first_name: "", last_name: "", passport_no: "",
-        phone: "", birth_day: "01", birth_month: "01", birth_year: "1990",
-        residence_city: "", idata_office: "", travel_purpose: "",
-        invoice_city: "", invoice_district: "", invoice_address: "",
-      });
-      setShowForm(false);
+      if (!form.email || !form.password) {
+        toast.error("Email ve şifre gerekli");
+        setLoading(false);
+        return;
+      }
+      const { error } = await supabase.from("idata_accounts" as any).insert({
+        ...form,
+        registration_status: "pending",
+        status: "active",
+      } as any);
+      if (error) {
+        toast.error("Hesap eklenemedi: " + error.message);
+      } else {
+        toast.success("iDATA kayıt talebi oluşturuldu!");
+        resetForm();
+      }
     }
     setLoading(false);
   };
@@ -222,7 +268,7 @@ export default function IdataAccounts() {
       <Button
         size="sm"
         variant={showForm ? "secondary" : "default"}
-        onClick={() => setShowForm(!showForm)}
+        onClick={() => { if (showForm) { resetForm(); } else { setEditingId(null); setShowForm(true); } }}
         className="gap-1.5"
       >
         <UserPlus className="w-4 h-4" />
@@ -338,9 +384,14 @@ export default function IdataAccounts() {
             </div>
           </div>
 
-          <Button onClick={addAccount} disabled={loading} size="sm" className="gap-1.5">
-            <UserPlus className="w-4 h-4" /> Kayıt Talebi Oluştur
+          <Button onClick={saveAccount} disabled={loading} size="sm" className="gap-1.5">
+            <UserPlus className="w-4 h-4" /> {editingId ? "Güncelle" : "Kayıt Talebi Oluştur"}
           </Button>
+          {editingId && (
+            <Button onClick={resetForm} size="sm" variant="outline" className="gap-1.5 ml-2">
+              İptal
+            </Button>
+          )}
         </Card>
       )}
 
@@ -372,6 +423,9 @@ export default function IdataAccounts() {
                   </div>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => loadToForm(acc)} className="gap-1">
+                    <Pencil className="w-3.5 h-3.5" /> Düzenle
+                  </Button>
                   {acc.status !== "active" && (
                     <Button size="sm" variant="outline" onClick={() => reactivateAccount(acc.id)} className="gap-1">
                       <UserCheck className="w-3.5 h-3.5" /> Aktif Et
