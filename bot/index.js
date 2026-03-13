@@ -2967,9 +2967,10 @@ async function registerVfsAccount(account) {
 
               if (!solvedAgain || !tokenAfterRetry) {
                 usedCaptchaManualFallback = true;
-                await logStep(regLogConfigId, "reg_captcha", `CAPTCHA otomatik doğrulanamadı, manuel/fallback submit deneniyor | ${account.email} | Ülke: ${regCountryLabel}`);
+                await logStep(regLogConfigId, "reg_captcha", `CAPTCHA otomatik doğrulanamadı, dashboard'dan onay bekleniyor | ${account.email} | Ülke: ${regCountryLabel}`);
                 console.log("  [REG] ⚠ CAPTCHA manuel/fallback moda geçiliyor...");
 
+                // Checkbox fallback denemeleri
                 for (let manualTry = 1; manualTry <= 3; manualTry++) {
                   await tryClickTurnstileCheckbox(page);
                   await delay(1500, 2800);
@@ -2977,6 +2978,19 @@ async function registerVfsAccount(account) {
                   if (tokenAfterRetry) {
                     console.log(`  [REG] ✅ Fallback deneme ${manualTry}/3 ile token alındı`);
                     break;
+                  }
+                }
+
+                // Hala token yoksa dashboard'dan onay bekle
+                if (!tokenAfterRetry) {
+                  await signalCaptchaWaiting(account.id);
+                  await logStep(regLogConfigId, "reg_captcha_wait", `CAPTCHA çözülemedi — dashboard'dan manuel onay bekleniyor | ${account.email}`);
+                  const approved = await waitForCaptchaManualApproval(account.id, 120000);
+                  if (approved) {
+                    await logStep(regLogConfigId, "reg_captcha_approved", `Manuel onay alındı, zorla devam ediliyor | ${account.email}`);
+                  } else {
+                    await clearCaptchaWaiting(account.id);
+                    throw new Error(`CAPTCHA manuel onay zaman aşımı | Ülke: ${regCountryLabel}`);
                   }
                 }
               }
@@ -2993,9 +3007,11 @@ async function registerVfsAccount(account) {
             }
 
             if (!forceResult.clicked) {
+              await clearCaptchaWaiting(account.id);
               throw new Error(`Devam Et butonu pasif kaldı (form invalid/captcha) | Ülke: ${regCountryLabel}`);
             }
 
+            await clearCaptchaWaiting(account.id);
             clickedSubmit = true;
             await delay(1200, 2400);
           }
