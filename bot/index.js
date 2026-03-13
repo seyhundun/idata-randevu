@@ -18,7 +18,7 @@ const CONFIG = {
   API_URL: "https://ocrpzwrsyiprfuzsyivf.supabase.co/functions/v1/bot-api",
   API_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
   VFS_URL: "https://visa.vfsglobal.com/tur/tr/fra/login",
-  CAPTCHA_API_KEY: process.env.CAPTCHA_API_KEY || "",
+  CAPTCHA_API_KEY: (process.env.CAPTCHA_API_KEY || process.env.TWOCAPTCHA_API_KEY || process.env.TWO_CAPTCHA_API_KEY || "").trim(),
   QUEUE_MAX_WAIT_MS: Number(process.env.QUEUE_MAX_WAIT_MS || 360000),
   QUEUE_POLL_MS: Number(process.env.QUEUE_POLL_MS || 10000),
   COOLDOWN_HOURS: Number(process.env.COOLDOWN_HOURS || 2),
