@@ -298,6 +298,16 @@ async function reportResult(configId, status, message = "", slotsAvailable = 0, 
   }
 }
 
+// Dashboard'da adım adım görünecek hafif log fonksiyonu
+async function logStep(configId, stepStatus, message = "") {
+  if (!configId) return;
+  try {
+    await apiPost({ config_id: configId, status: stepStatus, message, slots_available: 0 }, `step:${stepStatus}`);
+  } catch (err) {
+    // Adım logları kritik değil, sessizce geç
+  }
+}
+
 async function updateAccountStatus(accountId, status, failCount = null) {
   try {
     const body = { action: "update_account", account_id: accountId, status };
