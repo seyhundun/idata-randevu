@@ -2754,38 +2754,31 @@ async function main() {
         }, (readyAccounts.length > 0 ? readyAccounts : accounts)[0]);
 
         accountLastUsed.set(account.id, Date.now());
-        await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: ${getCurrentIp() || "doğrudan"}`);
+        await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: sıradaki proxy`);
         const result = await checkAppointments(config, account);
 
-        // IP engellendiyse hemen sonraki IP'ye geç ve kısa beklemeyle tekrar dene
+        // IP engellendiyse kısa bekleme ile sonraki döngüye geç (IP seçimi checkAppointments içinde round-robin)
         if (result.ipBlocked) {
-          console.log(`\n🔄 IP engellendi, 10s sonra yeni IP ile tekrar deneniyor...`);
-          await logStep(config.id, "ip_change", `IP değiştirildi → ${getCurrentIp() || "doğrudan"}`);
+          console.log(`\n🔄 IP engellendi, 10s sonra sıradaki IP ile tekrar deneniyor...`);
+          consecutiveErrors++;
+          await logStep(config.id, "ip_change", `IP engeli alındı, sıradaki IP otomatik denenecek`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
         }
 
-        if (result.found) { console.log("\n🎉 RANDEVU BULUNDU!"); consecutiveErrors = 0; }
-        else if (result.accountBanned) {
-          console.log(`\n⛔ Hesap banlı: ${account.email}`);
+        if (result.found) {
+          console.log("\n🎉 RANDEVU BULUNDU!");
+          consecutiveErrors = 0;
+        } else if (result.hadError) {
           consecutiveErrors++;
-          // Hata olunca da IP değiştir
-          if (IP_LIST.length > 0) {
-            const newIp = getNextIp();
-            await logStep(config.id, "ip_change", `Hata sonrası IP değişti → ${newIp || "doğrudan"}`);
+          await logStep(config.id, "ip_change", `Hata alındı, sıradaki IP otomatik denenecek`);
+          if (result.accountBanned) {
+            console.log(`\n⛔ Hesap banlı: ${account.email}`);
+          } else if (result.otpRequired) {
+            console.log(`\n📩 OTP gerekiyor: ${account.email}`);
           }
-        }
-        else {
-          if (result.otpRequired) {
-            consecutiveErrors++;
-            // OTP hatası olunca da IP değiştir
-            if (IP_LIST.length > 0) {
-              const newIp = getNextIp();
-              await logStep(config.id, "ip_change", `Hata sonrası IP değişti → ${newIp || "doğrudan"}`);
-            }
-          } else {
-            consecutiveErrors = 0;
-          }
+        } else {
+          consecutiveErrors = 0;
         }
 
         const baseInterval = Math.max(config.check_interval * 1000, CONFIG.BASE_INTERVAL_MS);
