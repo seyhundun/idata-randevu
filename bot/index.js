@@ -1218,10 +1218,12 @@ async function checkAppointments(config, account) {
     }
 
     console.log("  [5/6] ✅ Giriş başarılı!");
+    await logStep(id, "login_success", `Giriş başarılı! | ${account.email}`);
     await updateAccountStatus(account.id, "active", 0);
 
     // STEP 6: Randevu kontrol
     console.log("  [6/6] Randevu kontrol...");
+    await logStep(id, "search_start", "Dashboard yüklendi, randevu aranıyor...");
     await delay(2000, 4000);
     await humanMove(page);
     try {
