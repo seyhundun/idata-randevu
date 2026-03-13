@@ -204,7 +204,7 @@ export default function IdataAccounts() {
   const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
   const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
   const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 80 }, (_, i) => String(currentYear - 18 - i));
+  const years = Array.from({ length: 100 }, (_, i) => String(currentYear - i));
 
   return (
     <div className="space-y-4">
