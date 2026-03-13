@@ -129,6 +129,62 @@ const CONFIG = {
   MAX_BACKOFF_MS: Number(process.env.MAX_BACKOFF_MS || 900000),
 };
 
+const SUPABASE_REST_URL = "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1";
+const restHeaders = {
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${CONFIG.API_KEY}`,
+  apikey: CONFIG.API_KEY,
+};
+
+// CF blocked durumunu dashboard'a bildir (tracking_configs üzerinden)
+async function vfsSignalCfBlocked(configId, ip) {
+  try {
+    await fetch(`${SUPABASE_REST_URL}/tracking_configs?id=eq.${configId}`, {
+      method: "PATCH",
+      headers: { ...restHeaders, "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        cf_blocked_since: new Date().toISOString(),
+        cf_blocked_ip: ip || "unknown",
+        cf_retry_requested: false,
+      }),
+    });
+    console.log("  [CF] 🚨 Dashboard'a VFS CF engeli bildirildi");
+  } catch (err) {
+    console.error("  [CF] VFS Signal hatası:", err.message);
+  }
+}
+
+// CF retry isteği var mı kontrol et
+async function vfsCheckCfRetryRequested(configId) {
+  try {
+    const res = await fetch(`${SUPABASE_REST_URL}/tracking_configs?id=eq.${configId}&select=cf_retry_requested`, {
+      method: "GET",
+      headers: restHeaders,
+    });
+    const data = await res.json();
+    if (data?.[0]?.cf_retry_requested) {
+      await fetch(`${SUPABASE_REST_URL}/tracking_configs?id=eq.${configId}`, {
+        method: "PATCH",
+        headers: { ...restHeaders, "Prefer": "return=minimal" },
+        body: JSON.stringify({ cf_retry_requested: false, cf_blocked_since: null, cf_blocked_ip: null }),
+      });
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
+// CF blocked durumunu temizle
+async function vfsClearCfBlocked(configId) {
+  try {
+    await fetch(`${SUPABASE_REST_URL}/tracking_configs?id=eq.${configId}`, {
+      method: "PATCH",
+      headers: { ...restHeaders, "Prefer": "return=minimal" },
+      body: JSON.stringify({ cf_blocked_since: null, cf_blocked_ip: null, cf_retry_requested: false }),
+    });
+  } catch {}
+}
+
 console.log(`🔐 CAPTCHA API key: ${CONFIG.CAPTCHA_API_KEY ? `var (${CONFIG.CAPTCHA_API_KEY.length} karakter)` : "yok"}`);
 
 // ==================== FINGERPRINT ====================
