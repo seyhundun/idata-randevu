@@ -1667,29 +1667,160 @@ async function getRegistrationFormDiagnostics(page) {
   });
 }
 
-async function tryForceRegistrationSubmit(page) {
-  return await page.evaluate(() => {
-    const keywords = ["devam et", "devam", "continue", "register", "create", "kayıt", "oluştur", "sign up"];
-    const buttons = Array.from(document.querySelectorAll("button"));
-    const submitBtn = buttons.find((b) => {
-      const txt = (b.textContent || "").toLowerCase().trim();
-      return keywords.some((k) => txt.includes(k));
-    }) || document.querySelector('button[type="submit"]');
+async function tryForceRegistrationSubmit(page, options = {}) {
+  const { forceEnableDisabled = true } = options;
 
-    if (!submitBtn) return { clicked: false, forced: false, reason: "no_submit_button" };
+  return await page.evaluate((forceEnableDisabled) => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
 
-    const wasDisabled = !!submitBtn.disabled;
-    if (wasDisabled) {
-      submitBtn.disabled = false;
-      submitBtn.removeAttribute("disabled");
-      submitBtn.setAttribute("aria-disabled", "false");
+    const submitKeywords = ["devam et", "devam", "continue", "register", "create", "kayıt", "oluştur", "sign up", "next"];
+    const skipKeywords = ["cookie", "accept", "reject", "allow all", "filter", "cancel", "clear", "geri", "back"];
+
+    const hasRegisterFields = (root) => {
+      if (!root) return false;
+      const hasEmail = !!root.querySelector('input[type="email"], input[name*="email" i]');
+      const hasPassword = root.querySelectorAll('input[type="password"]').length >= 1;
+      return hasEmail && hasPassword;
+    };
+
+    const allButtons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+    let best = null;
+    let bestScore = -999;
+
+    for (const btn of allButtons) {
+      const text = ((btn.textContent || btn.value || "").trim().toLowerCase());
+      let score = 0;
+
+      if (!isVisible(btn)) score -= 120;
+      if (submitKeywords.some((k) => text.includes(k))) score += 80;
+      if (skipKeywords.some((k) => text.includes(k))) score -= 120;
+      if ((btn.type || "").toLowerCase() === "submit") score += 60;
+
+      const form = btn.closest("form");
+      if (hasRegisterFields(form)) score += 70;
+      if (!form && hasRegisterFields(document)) score += 20;
+
+      if (btn.disabled) score -= 10;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = btn;
+      }
     }
 
-    const form = submitBtn.closest("form");
-    if (form && typeof form.requestSubmit === "function") form.requestSubmit(submitBtn);
-    else submitBtn.click();
+    if (!best || bestScore < 30) {
+      return { clicked: false, forced: false, reason: "no_submit_button" };
+    }
 
-    return { clicked: true, forced: wasDisabled, reason: wasDisabled ? "force_enabled" : "normal_click" };
+    const wasDisabled = !!best.disabled || best.getAttribute("aria-disabled") === "true";
+    if (wasDisabled && !forceEnableDisabled) {
+      return { clicked: false, forced: false, reason: "disabled_button" };
+    }
+
+    if (wasDisabled && forceEnableDisabled) {
+      best.disabled = false;
+      best.removeAttribute("disabled");
+      best.setAttribute("aria-disabled", "false");
+    }
+
+    const form = best.closest("form") || document.querySelector("form");
+
+    try {
+      best.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      best.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      best.click();
+
+      if (form) {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        if (typeof form.requestSubmit === "function") {
+          try { form.requestSubmit(best); } catch {}
+        }
+      }
+    } catch {
+      return { clicked: false, forced: wasDisabled, reason: "submit_click_failed" };
+    }
+
+    return {
+      clicked: true,
+      forced: wasDisabled,
+      reason: wasDisabled ? "force_enabled" : "normal_click",
+      buttonText: (best.textContent || best.value || "").trim().slice(0, 40),
+    };
+  }, forceEnableDisabled);
+}
+
+async function clickOtpVerification(page) {
+  return await page.evaluate(() => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+
+    const verifyKeywords = ["verify", "doğrula", "onayla", "confirm", "gönder", "submit", "continue", "devam"];
+    const skipKeywords = ["cookie", "accept", "reject", "allow all", "filter", "cancel", "clear", "geri", "back"];
+    const otpInputs = document.querySelectorAll('input[autocomplete="one-time-code"], input[name*="otp" i], input[id*="otp" i], input[maxlength="1"], input[maxlength="6"]');
+
+    const candidates = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+    let best = null;
+    let bestScore = -999;
+
+    for (const btn of candidates) {
+      const text = ((btn.textContent || btn.value || "").trim().toLowerCase());
+      let score = 0;
+
+      if (!isVisible(btn)) score -= 120;
+      if (verifyKeywords.some((k) => text.includes(k))) score += 80;
+      if (skipKeywords.some((k) => text.includes(k))) score -= 120;
+      if ((btn.type || "").toLowerCase() === "submit") score += 40;
+      if (otpInputs.length > 0 && btn.closest("form")) score += 35;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = btn;
+      }
+    }
+
+    if (!best || bestScore < 25) {
+      return { clicked: false, forced: false, reason: "no_verify_button" };
+    }
+
+    const wasDisabled = !!best.disabled || best.getAttribute("aria-disabled") === "true";
+    if (wasDisabled) {
+      best.disabled = false;
+      best.removeAttribute("disabled");
+      best.setAttribute("aria-disabled", "false");
+    }
+
+    const form = best.closest("form") || document.querySelector("form");
+
+    try {
+      best.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      best.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      best.click();
+
+      if (form) {
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        if (typeof form.requestSubmit === "function") {
+          try { form.requestSubmit(best); } catch {}
+        }
+      }
+    } catch {
+      return { clicked: false, forced: wasDisabled, reason: "verify_click_failed" };
+    }
+
+    return {
+      clicked: true,
+      forced: wasDisabled,
+      reason: wasDisabled ? "force_enabled" : "normal_click",
+      buttonText: (best.textContent || best.value || "").trim().slice(0, 40),
+    };
   });
 }
 
