@@ -2687,9 +2687,6 @@ async function main() {
 
       for (const config of configs) {
         // Her döngüde aktiflik kontrolü — dashboard'dan durdurulmuş olabilir
-        const { data: freshConfig } = await fetchApiJson(
-          { method: "GET", headers: apiHeaders }, "check_active"
-        ).catch(() => ({ data: null }));
         
         // Config hala aktif mi kontrol et
         let stillActive = true;
