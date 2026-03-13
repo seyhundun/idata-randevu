@@ -770,6 +770,77 @@ async function getLoginCaptchaState(page) {
   });
 }
 
+async function getTurnstileDiagnostics(page) {
+  return await page.evaluate(() => {
+    const body = (document.body?.innerText || "").toLowerCase();
+    const title = (document.title || "").toLowerCase();
+    const url = (window.location.href || "").toLowerCase();
+
+    const tokenFields = Array.from(
+      document.querySelectorAll(
+        'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"], input[name*="turnstile"], textarea[name*="turnstile"], textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"]'
+      )
+    );
+
+    const tokenFieldLengths = tokenFields.map((el) => String(el.value || "").trim().length);
+    const maxFieldTokenLength = tokenFieldLengths.length ? Math.max(...tokenFieldLengths) : 0;
+
+    let apiTokenLength = 0;
+    try {
+      if (window.turnstile && typeof window.turnstile.getResponse === "function") {
+        const response = window.turnstile.getResponse();
+        apiTokenLength = typeof response === "string" ? response.trim().length : 0;
+      }
+    } catch {}
+
+    const loginBtn =
+      Array.from(document.querySelectorAll("button")).find((b) => {
+        const txt = (b.textContent || "").toLowerCase();
+        return txt.includes("oturum") || txt.includes("sign in") || txt.includes("login") || txt.includes("giriş");
+      }) || document.querySelector('button[type="submit"]');
+
+    const submitDisabled = !!loginBtn && (
+      loginBtn.disabled ||
+      loginBtn.hasAttribute("disabled") ||
+      loginBtn.getAttribute("aria-disabled") === "true"
+    );
+
+    return {
+      url,
+      title,
+      isLoginPage: url.includes("/login"),
+      hasLoginForm: !!document.querySelector('input[type="email"], input[name="email"], #email'),
+      widgetCount: document.querySelectorAll('.cf-turnstile, [name*="turnstile"], [data-sitekey]').length,
+      iframeCount: document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]').length,
+      tokenFieldCount: tokenFields.length,
+      maxFieldTokenLength,
+      apiTokenLength,
+      hasCaptchaHints:
+        body.includes("verify you are human") ||
+        body.includes("robot olmadığınızı") ||
+        body.includes("captcha") ||
+        body.includes("doğrulama"),
+      hasWaitingRoomHints: title.includes("waiting room") || body.includes("şu anda sıradasınız"),
+      submitDisabled,
+    };
+  });
+}
+
+function formatTurnstileDiagnostics(diag) {
+  if (!diag) return "diag=yok";
+  return [
+    `url=${(diag.url || "").slice(0, 80)}`,
+    `widget=${diag.widgetCount}`,
+    `iframe=${diag.iframeCount}`,
+    `fields=${diag.tokenFieldCount}`,
+    `fieldTokenLen=${diag.maxFieldTokenLength}`,
+    `apiTokenLen=${diag.apiTokenLength}`,
+    `submitDisabled=${diag.submitDisabled ? 1 : 0}`,
+    `captchaHint=${diag.hasCaptchaHints ? 1 : 0}`,
+    `waitingHint=${diag.hasWaitingRoomHints ? 1 : 0}`,
+  ].join(" | ");
+}
+
 async function tryClickTurnstileCheckbox(page) {
   const selectors = [
     'input[type="checkbox"]',
