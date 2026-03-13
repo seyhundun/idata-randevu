@@ -3008,7 +3008,7 @@ async function registerVfsAccount(account) {
     // OTP DOĞRULAMA
     console.log("  [REG] OTP doğrulama kontrol...");
     await logStep(regLogConfigId, "reg_otp_wait", `Form gönderildi, OTP ekranı bekleniyor | ${account.email}`);
-    const otpScreen = await waitForOtpScreenAfterSubmit(page, 70000);
+    const otpScreen = await waitForOtpScreenAfterSubmit(page, usedCaptchaManualFallback ? 120000 : 70000);
 
     if (!otpScreen.ok) {
       const pageText = otpScreen.pageTextPreview || await page.evaluate(() => (document.body?.innerText || '').substring(0, 300));
