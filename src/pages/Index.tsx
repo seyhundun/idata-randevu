@@ -69,6 +69,7 @@ const Index = () => {
 
           <TabsContent value="idata" className="space-y-8 mt-6">
             <IdataAccounts />
+            <IdataTrackingLogs />
           </TabsContent>
         </Tabs>
       </main>
