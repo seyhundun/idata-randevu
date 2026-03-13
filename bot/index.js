@@ -1137,9 +1137,11 @@ async function checkAppointments(config, account) {
   const ts = new Date().toLocaleTimeString("tr-TR");
   // Her kontrolde sıradaki IP'yi kullan (round-robin)
   const activeIp = IP_LIST.length > 0 ? getNextIp() : null;
-  console.log(`\n[${ts}] Kontrol: ${country} ${city} | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
-  await logStep(id, "bot_start", `Kontrol başlıyor | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
-  await logStep(id, "ip_change", `Aktif IP: ${activeIp || "doğrudan"} | Hesap: ${account.email}`);
+  const countryLabels = { france: "Fransa", netherlands: "Hollanda", denmark: "Danimarka" };
+  const countryLabel = countryLabels[country] || country;
+  console.log(`\n[${ts}] Kontrol: ${countryLabel} ${city} | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
+  await logStep(id, "bot_start", `Kontrol başlıyor | ${account.email} | Ülke: ${countryLabel} | IP: ${activeIp || "doğrudan"}`);
+  await logStep(id, "ip_change", `Aktif IP: ${activeIp || "doğrudan"} | Hesap: ${account.email} | Ülke: ${countryLabel}`);
 
   let browser;
   try {
