@@ -1827,6 +1827,7 @@ async function clickOtpVerification(page) {
 async function waitForOtpScreenAfterSubmit(page, timeoutMs = 45000) {
   const startedAt = Date.now();
   let retriedCaptchaOnce = false;
+  let retriedSubmitOnce = false;
 
   while (Date.now() - startedAt < timeoutMs) {
     const state = await page.evaluate(() => {
