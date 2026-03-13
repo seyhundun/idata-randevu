@@ -2114,13 +2114,23 @@ async function registerVfsAccount(account) {
   const ts = new Date().toLocaleTimeString("tr-TR");
   console.log(`\n[${ts}] 📝 VFS Kayıt: ${account.email}`);
   
-  // Dashboard'da göstermek için aktif config ID'yi al
+  // Dashboard'da göstermek için aktif config ID'yi ve ülkeyi al
   let regLogConfigId = null;
+  let regCountry = "france";
+  let regCountryLabel = "Fransa";
   try {
     const { configs } = await fetchActiveConfigs();
-    if (configs.length > 0) regLogConfigId = configs[0].id;
+    if (configs.length > 0) {
+      regLogConfigId = configs[0].id;
+      if (configs[0].country) regCountry = configs[0].country;
+    }
   } catch {}
-  await logStep(regLogConfigId, "reg_start", `Kayıt başlıyor | ${account.email}`);
+
+  // Ülke label eşlemesi
+  const countryLabels = { france: "Fransa", netherlands: "Hollanda", denmark: "Danimarka" };
+  regCountryLabel = countryLabels[regCountry] || regCountry;
+
+  await logStep(regLogConfigId, "reg_start", `Kayıt başlıyor | ${account.email} | Ülke: ${regCountryLabel}`);
 
   let browser;
   let page;
@@ -2132,14 +2142,8 @@ async function registerVfsAccount(account) {
     await applyFingerprint(page, fp);
     await humanMove(page);
 
-    // Aktif config'den ülkeyi al ve ona göre kayıt URL'sini belirle
-    let regCountry = "france";
-    try {
-      const { configs } = await fetchActiveConfigs();
-      if (configs.length > 0 && configs[0].country) regCountry = configs[0].country;
-    } catch {}
     const regUrl = getVfsRegisterUrl(regCountry);
-    console.log(`  [REG 1/7] Kayıt sayfası: ${regUrl}`);
+    console.log(`  [REG 1/7] Kayıt sayfası: ${regUrl} (${regCountryLabel})`);
     await page.goto(regUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
     await humanIdle(5000, 10000); // Sayfayı okuyormuş gibi bekle
     await humanMove(page);
