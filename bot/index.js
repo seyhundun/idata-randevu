@@ -1347,7 +1347,7 @@ async function checkAppointments(config, account) {
     const pageHtml = await page.evaluate(() => document.documentElement?.outerHTML || "").catch(() => "");
     if (isPageBlocked(pageContent) || pageHtml.trim().length < 500) {
       console.log(`  [IP] 🚫 Sayfa yüklenemedi / engellendi! IP: ${activeIp}`);
-      markIpFail(activeIp);
+      banIpImmediately(activeIp, "login_page_blocked_or_empty");
       const ss = await takeScreenshotBase64(page);
       await logStep(id, "network_error", `IP engellendi: ${activeIp || "doğrudan"}`);
       await reportResult(id, "error", `IP engellendi: ${activeIp || "doğrudan"} | Hesap: ${account.email}`, 0, ss);
