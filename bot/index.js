@@ -1,10 +1,85 @@
 /**
  * VFS Global Randevu Takip Botu v7.1
  * puppeteer-real-browser + Fingerprint + Kayıt Otomasyonu
- * Proxy DEVRE DIŞI
+ * IP Rotasyonu + Fingerprint + Kayıt Otomasyonu
  */
 
 require("dotenv").config();
+
+// ==================== IP ROTATION ====================
+const IP_LIST = (process.env.IP_LIST || "").split(",").map(s => s.trim()).filter(Boolean);
+let currentIpIndex = 0;
+let ipFailCounts = new Map(); // IP başına hata sayısı
+const IP_MAX_FAILS = 3; // Bu kadar ardışık hatadan sonra IP'yi atla
+const IP_BAN_DURATION_MS = Number(process.env.IP_BAN_DURATION_MS || 1800000); // 30 dk ban
+let ipBannedUntil = new Map(); // IP ban süreleri
+
+function getNextIp() {
+  if (IP_LIST.length === 0) return null;
+  
+  const now = Date.now();
+  let attempts = 0;
+  
+  while (attempts < IP_LIST.length) {
+    currentIpIndex = (currentIpIndex + 1) % IP_LIST.length;
+    const ip = IP_LIST[currentIpIndex];
+    const bannedUntil = ipBannedUntil.get(ip) || 0;
+    
+    if (now >= bannedUntil) {
+      console.log(`  [IP] 🔄 Sonraki IP: ${ip} (${currentIpIndex + 1}/${IP_LIST.length})`);
+      return ip;
+    }
+    
+    const remainSec = Math.round((bannedUntil - now) / 1000);
+    console.log(`  [IP] ⏭ ${ip} banlı (${remainSec}s kaldı), atlıyorum...`);
+    attempts++;
+  }
+  
+  // Tüm IP'ler banlıysa en az banlı olanı seç
+  const earliest = IP_LIST.reduce((best, ip) => {
+    const t = ipBannedUntil.get(ip) || 0;
+    const tBest = ipBannedUntil.get(best) || 0;
+    return t < tBest ? ip : best;
+  });
+  console.log(`  [IP] ⚠ Tüm IP'ler banlı, en erken açılanı kullanıyorum: ${earliest}`);
+  ipBannedUntil.delete(earliest);
+  ipFailCounts.set(earliest, 0);
+  currentIpIndex = IP_LIST.indexOf(earliest);
+  return earliest;
+}
+
+function getCurrentIp() {
+  if (IP_LIST.length === 0) return null;
+  return IP_LIST[currentIpIndex];
+}
+
+function markIpSuccess(ip) {
+  if (!ip) return;
+  ipFailCounts.set(ip, 0);
+}
+
+function markIpFail(ip) {
+  if (!ip) return;
+  const count = (ipFailCounts.get(ip) || 0) + 1;
+  ipFailCounts.set(ip, count);
+  console.log(`  [IP] ❌ ${ip} hata: ${count}/${IP_MAX_FAILS}`);
+  
+  if (count >= IP_MAX_FAILS) {
+    ipBannedUntil.set(ip, Date.now() + IP_BAN_DURATION_MS);
+    ipFailCounts.set(ip, 0);
+    console.log(`  [IP] 🚫 ${ip} ${IP_BAN_DURATION_MS / 60000} dk boyunca banlı!`);
+  }
+}
+
+function isPageBlocked(pageContent) {
+  if (!pageContent || pageContent.trim().length < 100) return true; // boş sayfa
+  const lower = pageContent.toLowerCase();
+  return lower.includes("access denied") || 
+         lower.includes("blocked") ||
+         lower.includes("403 forbidden") ||
+         lower.includes("just a moment") ||
+         lower.includes("ray id");
+}
 
 let Solver;
 try {
@@ -829,19 +904,28 @@ async function applyFingerprint(page, fp) {
 }
 
 // ==================== BROWSER LAUNCH ====================
-async function launchBrowser() {
+async function launchBrowser(proxyIp = null) {
   const { connect } = require("puppeteer-real-browser");
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--window-size=1366,768",
+  ];
+  
+  // IP rotasyonu: her IP için local SOCKS5 proxy kullan
+  if (proxyIp) {
+    const proxyPort = 10800 + IP_LIST.indexOf(proxyIp);
+    args.push(`--proxy-server=socks5://127.0.0.1:${proxyPort}`);
+    console.log(`  [BROWSER] 🌐 Proxy: socks5://127.0.0.1:${proxyPort} (IP: ${proxyIp})`);
+  }
+  
   const { browser, page } = await connect({
     headless: false,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--window-size=1366,768",
-    ],
+    args,
   });
-  console.log("  [BROWSER] ✅ Real browser başlatıldı (proxy yok)");
+  console.log(`  [BROWSER] ✅ Real browser başlatıldı ${proxyIp ? `(IP: ${proxyIp})` : "(proxy yok)"}`);
   return { browser, page };
 }
 
@@ -849,13 +933,35 @@ async function launchBrowser() {
 async function checkAppointments(config, account) {
   const { id, country, city } = config;
   const ts = new Date().toLocaleTimeString("tr-TR");
-  console.log(`\n[${ts}] Kontrol: ${country} ${city} | Hesap: ${account.email}`);
+  const activeIp = getCurrentIp();
+  console.log(`\n[${ts}] Kontrol: ${country} ${city} | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
 
   let browser;
   try {
     const fp = generateFingerprint();
-    const { browser: br, page } = await launchBrowser();
+    const { browser: br, page } = await launchBrowser(activeIp);
     browser = br;
+    await applyFingerprint(page, fp);
+    await humanMove(page);
+
+    // STEP 1: Giriş sayfası
+    console.log("  [1/6] Giriş sayfası...");
+    await page.goto(CONFIG.VFS_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
+    await delay(3000, 6000);
+    
+    // IP engel kontrolü
+    const pageContent = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+    const pageHtml = await page.evaluate(() => document.documentElement?.outerHTML || "").catch(() => "");
+    if (isPageBlocked(pageContent) || pageHtml.trim().length < 500) {
+      console.log(`  [IP] 🚫 Sayfa yüklenemedi / engellendi! IP: ${activeIp}`);
+      markIpFail(activeIp);
+      const ss = await takeScreenshotBase64(page);
+      await reportResult(id, "error", `IP engellendi: ${activeIp || "doğrudan"} | Hesap: ${account.email}`, 0, ss);
+      const nextIp = getNextIp();
+      return { found: false, accountBanned: false, ipBlocked: true };
+    }
+    markIpSuccess(activeIp);
+    await humanMove(page);
     await applyFingerprint(page, fp);
     await humanMove(page);
 
@@ -2134,11 +2240,16 @@ async function registerVfsAccount(account) {
 // ==================== MAIN LOOP ====================
 async function main() {
   console.log("═══════════════════════════════════════════");
-  console.log("  VFS Randevu Takip Botu v7.1");
-  console.log("  Real Browser + Fingerprint + Kayıt");
-  console.log("  Proxy: KAPALI");
+  console.log("  VFS Randevu Takip Botu v8.0");
+  console.log("  Real Browser + Fingerprint + IP Rotasyonu");
   console.log("═══════════════════════════════════════════");
 
+  if (IP_LIST.length > 0) {
+    console.log(`✅ IP Rotasyonu aktif: ${IP_LIST.length} IP`);
+    IP_LIST.forEach((ip, i) => console.log(`   ${i + 1}. ${ip} → socks5://127.0.0.1:${10800 + i}`));
+  } else {
+    console.log("⚠ IP_LIST boş — doğrudan bağlantı kullanılacak");
+  }
   if (CONFIG.CAPTCHA_API_KEY) console.log("✅ CAPTCHA çözücü aktif");
   else console.log("⚠ CAPTCHA_API_KEY yok");
   console.log("✅ Fingerprint randomization aktif");
@@ -2224,6 +2335,13 @@ async function main() {
 
         accountLastUsed.set(account.id, Date.now());
         const result = await checkAppointments(config, account);
+
+        // IP engellendiyse hemen sonraki IP'ye geç ve kısa beklemeyle tekrar dene
+        if (result.ipBlocked) {
+          console.log(`\n🔄 IP engellendi, 10s sonra yeni IP ile tekrar deneniyor...`);
+          await new Promise((r) => setTimeout(r, 10000));
+          continue; // aynı config'i yeni IP ile tekrar dene
+        }
 
         if (result.found) { console.log("\n🎉 RANDEVU BULUNDU!"); consecutiveErrors = 0; }
         else if (result.accountBanned) { console.log(`\n⛔ Hesap banlı: ${account.email}`); consecutiveErrors++; }

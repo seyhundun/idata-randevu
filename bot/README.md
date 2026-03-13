@@ -1,6 +1,6 @@
-# VFS Global Randevu Takip Botu
+# VFS Global Randevu Takip Botu v8.0
 
-Bu bot, VFS Global sitesinde Fransa-Ankara turist vizesi randevusu kontrol eder ve sonuçları dashboard'a bildirir.
+Bu bot, VFS Global sitesinde randevu kontrol eder ve IP rotasyonu ile engelleri aşar.
 
 ## Kurulum
 
@@ -9,28 +9,45 @@ cd bot
 npm install
 ```
 
-## Çalıştırma
+## IP Rotasyonu Kurulumu (10 IP)
+
+### 1. microsocks kur (her IP için SOCKS5 proxy)
 
 ```bash
-node index.js
+sudo apt install -y build-essential git
+git clone https://github.com/rofl0r/microsocks.git
+cd microsocks && make && sudo cp microsocks /usr/local/bin/
 ```
 
-## VPS'te Sürekli Çalıştırma (PM2)
+### 2. Her IP için microsocks başlat
 
 ```bash
-npm install -g pm2
+# IP'lerinizi buraya yazın
+IPS=("1.2.3.4" "1.2.3.5" "1.2.3.6" "1.2.3.7" "1.2.3.8" "1.2.3.9" "1.2.3.10" "1.2.3.11" "1.2.3.12" "1.2.3.13")
+PORT=10800
+
+for i in "${!IPS[@]}"; do
+  P=$((PORT + i))
+  microsocks -i 127.0.0.1 -p $P -o ${IPS[$i]} &
+  echo "microsocks: 127.0.0.1:$P -> ${IPS[$i]}"
+done
+```
+
+### 3. PM2 ile kalıcı yap
+
+`microsocks-start.sh` dosyası oluşturun (yukarıdaki script) ve:
+```bash
+pm2 start microsocks-start.sh --name microsocks-proxies
 pm2 start index.js --name vfs-bot
-pm2 save
-pm2 startup
+pm2 save && pm2 startup
 ```
 
 ## Ortam Değişkenleri (.env)
 
-Bot klasöründe bir `.env` dosyası oluşturun:
-
 ```
-VFS_EMAIL=vfs_hesap_emailiniz
-VFS_PASSWORD=vfs_hesap_sifreniz
+IP_LIST=1.2.3.4,1.2.3.5,1.2.3.6,1.2.3.7,1.2.3.8,1.2.3.9,1.2.3.10,1.2.3.11,1.2.3.12,1.2.3.13
+CAPTCHA_API_KEY=2captcha_api_anahtariniz
+IP_BAN_DURATION_MS=1800000
 ```
 
-> **Not:** VFS Global hesabınızın email ve şifresini girmeniz gerekir.
+> **Not:** `IP_LIST` virgülle ayrılmış VDS IP adresleriniz. Bot engellenince otomatik olarak sonraki IP'ye geçer.
