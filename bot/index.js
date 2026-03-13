@@ -1619,9 +1619,19 @@ async function getRegistrationFormDiagnostics(page) {
     const hasTurnstileWidget =
       !!document.querySelector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [name*="turnstile"]');
 
-    const hasCaptchaToken = Array.from(
-      document.querySelectorAll('input[name="cf-turnstile-response"], input[name*="turnstile"], textarea[name="g-recaptcha-response"]')
+    const hasCaptchaTokenFromField = Array.from(
+      document.querySelectorAll('input[name="cf-turnstile-response"], input[name*="turnstile"], textarea[name="g-recaptcha-response"], textarea[name="cf-turnstile-response"], input[name="g-recaptcha-response"]')
     ).some((el) => String(el.value || "").trim().length > 20);
+
+    let hasCaptchaTokenFromApi = false;
+    try {
+      if (window.turnstile && typeof window.turnstile.getResponse === "function") {
+        const response = window.turnstile.getResponse();
+        hasCaptchaTokenFromApi = typeof response === "string" && response.trim().length > 20;
+      }
+    } catch {}
+
+    const hasCaptchaToken = hasCaptchaTokenFromField || hasCaptchaTokenFromApi;
 
     return {
       submitDisabled: !!submitBtn?.disabled,
