@@ -285,7 +285,67 @@ async function isIdataActive() {
   }
 }
 
-// ==================== 2CAPTCHA IMAGE SOLVER ====================
+// CF blocked durumunu dashboard'a bildir
+async function signalCfBlocked(ip) {
+  try {
+    await fetch(CONFIG.API_URL + "/idata", { method: "GET", headers: apiHeaders }); // config'i al
+    // Doğrudan Supabase REST API ile güncelle
+    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
+      method: "PATCH",
+      headers: {
+        ...apiHeaders,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify({
+        cf_blocked_since: new Date().toISOString(),
+        cf_blocked_ip: ip || "unknown",
+        cf_retry_requested: false,
+      }),
+    });
+    console.log("  [CF] 🚨 Dashboard'a CF engeli bildirildi");
+  } catch (err) {
+    console.error("  [CF] Signal hatası:", err.message);
+  }
+}
+
+// CF retry isteği var mı kontrol et
+async function checkCfRetryRequested() {
+  try {
+    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const res = await fetch(`${supabaseUrl}/rest/v1/idata_config?select=cf_retry_requested&limit=1`, {
+      method: "GET",
+      headers: apiHeaders,
+    });
+    const data = await res.json();
+    if (data?.[0]?.cf_retry_requested) {
+      // Temizle
+      await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
+        method: "PATCH",
+        headers: { ...apiHeaders, "Prefer": "return=minimal" },
+        body: JSON.stringify({ cf_retry_requested: false, cf_blocked_since: null, cf_blocked_ip: null }),
+      });
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// CF blocked durumunu temizle
+async function clearCfBlocked() {
+  try {
+    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
+      method: "PATCH",
+      headers: { ...apiHeaders, "Prefer": "return=minimal" },
+      body: JSON.stringify({ cf_blocked_since: null, cf_blocked_ip: null, cf_retry_requested: false }),
+    });
+  } catch {}
+}
+
+
 async function solveImageCaptcha(page) {
   if (!CONFIG.CAPTCHA_API_KEY) {
     console.log("  [CAPTCHA] ⚠ API key yok, CAPTCHA çözülemez!");
