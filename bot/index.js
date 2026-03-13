@@ -2430,10 +2430,33 @@ async function registerVfsAccount(account) {
     await tickAllCheckboxes(page);
     await humanIdle(2000, 4000);
 
-    // CAPTCHA
+    // CAPTCHA — birden fazla deneme
     console.log("  [REG] CAPTCHA kontrol...");
+    await logStep(regLogConfigId, "reg_captcha", `CAPTCHA çözülüyor | ${account.email} | Ülke: ${regCountryLabel}`);
     await humanMove(page);
-    await solveTurnstile(page);
+
+    let regCaptchaToken = "";
+    for (let captchaAttempt = 1; captchaAttempt <= 3; captchaAttempt++) {
+      console.log(`  [REG] CAPTCHA deneme ${captchaAttempt}/3`);
+      await solveTurnstile(page);
+      await delay(2000, 4000);
+      regCaptchaToken = await waitForTurnstileToken(page, 8000);
+      if (regCaptchaToken) {
+        console.log("  [REG] ✅ CAPTCHA token alındı");
+        break;
+      }
+      // Token yoksa checkbox click dene
+      await tryClickTurnstileCheckbox(page);
+      await delay(1500, 3000);
+      regCaptchaToken = await waitForTurnstileToken(page, 6000);
+      if (regCaptchaToken) {
+        console.log("  [REG] ✅ CAPTCHA token (checkbox) alındı");
+        break;
+      }
+    }
+    if (!regCaptchaToken) {
+      console.log("  [REG] ⚠ CAPTCHA token alınamadı, devam ediliyor...");
+    }
     await humanIdle(3000, 6000);
 
     // Screenshot gönder (submit öncesi)
