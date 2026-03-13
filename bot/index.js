@@ -3266,13 +3266,49 @@ async function main() {
         await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: sıradaki proxy`);
         const result = await checkAppointments(config, account);
 
-        // IP engellendiyse kısa bekleme ile sonraki döngüye geç (IP seçimi checkAppointments içinde round-robin)
+        // IP engellendiyse — CF retry mekanizması
         if (result.ipBlocked) {
-          console.log(`\n🔄 IP engellendi, 10s sonra sıradaki IP ile tekrar deneniyor...`);
           consecutiveErrors++;
-          await logStep(config.id, "ip_change", `IP engeli alındı, sıradaki IP otomatik denenecek`);
+          const ip = getCurrentIp();
+          
+          // 3 ardışık CF hatası → dashboard'a bildir ve bekle
+          if (consecutiveErrors >= 3) {
+            await logStep(config.id, "cloudflare", `🚫 Ardışık CF engeli (${consecutiveErrors}x) | IP: ${ip || "?"}`);
+            await vfsSignalCfBlocked(config.id, ip);
+            console.log(`\n  🚫 [CF] ${consecutiveErrors} ardışık engel! Dashboard'dan retry bekleniyor...`);
+            
+            while (true) {
+              const retryRequested = await vfsCheckCfRetryRequested(config.id);
+              if (retryRequested) {
+                console.log("  ✅ [CF] Dashboard'dan retry isteği alındı!");
+                await logStep(config.id, "cf_retry", "Dashboard'dan retry isteği alındı, yeni IP ile deneniyor");
+                ipBannedUntil.clear();
+                consecutiveErrors = 0;
+                break;
+              }
+              // Config hala aktif mi?
+              try {
+                const freshData = await apiGet("cf_wait_check");
+                const activeConfig = (freshData.configs || []).find(c => c.id === config.id);
+                if (!activeConfig) {
+                  await vfsClearCfBlocked(config.id);
+                  break;
+                }
+              } catch {}
+              await new Promise((r) => setTimeout(r, 5000));
+            }
+            continue;
+          }
+          
+          console.log(`\n🔄 IP engellendi (${consecutiveErrors}/3), 10s sonra sıradaki IP ile deneniyor...`);
+          await logStep(config.id, "ip_change", `CF engeli ${consecutiveErrors}/3 | IP: ${ip || "?"}`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
+        }
+        
+        // Başarılı kontrol — CF durumunu temizle
+        if (!result.hadError) {
+          await vfsClearCfBlocked(config.id);
         }
 
         if (result.found) {
