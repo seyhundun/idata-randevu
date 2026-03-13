@@ -582,11 +582,26 @@ async function readTurnstileToken(page) {
   return await page.evaluate(() => {
     const fields = Array.from(
       document.querySelectorAll(
-        'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"], input[name*="turnstile"], textarea[name*="turnstile"], textarea[name="g-recaptcha-response"]'
+        'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"], input[name*="turnstile"], textarea[name*="turnstile"], textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"]'
       )
     );
-    const token = fields.map((el) => String(el.value || "").trim()).find((v) => v.length > 20);
-    return token || "";
+
+    const fieldToken = fields
+      .map((el) => String(el.value || "").trim())
+      .find((v) => v.length > 20);
+
+    if (fieldToken) return fieldToken;
+
+    try {
+      if (window.turnstile && typeof window.turnstile.getResponse === "function") {
+        const response = window.turnstile.getResponse();
+        if (typeof response === "string" && response.trim().length > 20) {
+          return response.trim();
+        }
+      }
+    } catch {}
+
+    return "";
   });
 }
 
