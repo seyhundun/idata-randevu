@@ -8,7 +8,7 @@ require("dotenv").config();
 
 // ==================== IP ROTATION ====================
 const IP_LIST = (process.env.IP_LIST || "").split(",").map(s => s.trim()).filter(Boolean);
-let currentIpIndex = 0;
+let currentIpIndex = -1;
 let ipFailCounts = new Map(); // IP başına hata sayısı
 const IP_MAX_FAILS = 3; // Bu kadar ardışık hatadan sonra IP'yi atla
 const IP_BAN_DURATION_MS = Number(process.env.IP_BAN_DURATION_MS || 1800000); // 30 dk ban
@@ -50,6 +50,7 @@ function getNextIp() {
 
 function getCurrentIp() {
   if (IP_LIST.length === 0) return null;
+  if (currentIpIndex < 0 || currentIpIndex >= IP_LIST.length) return null;
   return IP_LIST[currentIpIndex];
 }
 
@@ -1028,8 +1029,7 @@ async function checkAppointments(config, account) {
       const ss = await takeScreenshotBase64(page);
       await logStep(id, "network_error", `IP engellendi: ${activeIp || "doğrudan"}`);
       await reportResult(id, "error", `IP engellendi: ${activeIp || "doğrudan"} | Hesap: ${account.email}`, 0, ss);
-      const nextIp = getNextIp();
-      return { found: false, accountBanned: false, ipBlocked: true };
+      return { found: false, accountBanned: false, ipBlocked: true, hadError: true };
     }
     markIpSuccess(activeIp);
     await humanScroll(page);
@@ -1064,7 +1064,7 @@ async function checkAppointments(config, account) {
     if (!queueResult.ok) {
       const ss = await takeScreenshotBase64(page);
       await reportResult(id, "error", `${queueResult.reason} | Hesap: ${account.email}`, 0, ss);
-      return { found: false, accountBanned: false };
+      return { found: false, accountBanned: false, hadError: true };
     }
 
     // STEP 4: Login
@@ -1173,7 +1173,7 @@ async function checkAppointments(config, account) {
       await logStep(id, "login_fail", `OTP doğrulama gerekli | ${account.email}`);
       await reportResult(id, "error", `OTP doğrulama gerekli | Hesap: ${account.email}`, 0, otpResult.screenshot);
       await updateAccountStatus(account.id, "cooldown", (account.fail_count || 0) + 1);
-      return { found: false, accountBanned: false, otpRequired: true };
+      return { found: false, accountBanned: false, otpRequired: true, hadError: true };
     }
 
     // Login doğrulama
@@ -1213,11 +1213,11 @@ async function checkAppointments(config, account) {
       console.log(`  [5/6] ${errorType} | Hesap: ${account.email}`);
       const ss = await takeScreenshotBase64(page);
       await reportResult(id, "error", `${errorType} | Hesap: ${account.email}`, 0, ss);
-      if (isBanned) { await updateAccountStatus(account.id, "banned"); return { found: false, accountBanned: true }; }
+      if (isBanned) { await updateAccountStatus(account.id, "banned"); return { found: false, accountBanned: true, hadError: true }; }
       const newFailCount = (account.fail_count || 0) + 1;
       if (newFailCount >= 3) { await updateAccountStatus(account.id, "cooldown", newFailCount); }
       else { await updateAccountStatus(account.id, "active", newFailCount); }
-      return { found: false, accountBanned: false };
+      return { found: false, accountBanned: false, hadError: true };
     }
 
     console.log("  [5/6] ✅ Giriş başarılı!");
@@ -1258,18 +1258,18 @@ async function checkAppointments(config, account) {
       console.log("  ✅ RANDEVU BULUNDU!");
       await logStep(id, "found", `🎉 RANDEVU BULUNDU! | ${account.email}`);
       await reportResult(id, "found", `Randevu müsait! Hesap: ${account.email}`, 1, ss);
-      return { found: true, accountBanned: false };
+      return { found: true, accountBanned: false, hadError: false };
     } else {
       console.log("  ❌ Randevu yok.");
       await logStep(id, "no_slots", `Müsait randevu yok | ${account.email}`);
       const msg = noAppointment ? "Müsait randevu yok." : "Dashboard yüklendi, randevu yok.";
       await reportResult(id, "checking", `${msg} | Hesap: ${account.email}`, 0, ss);
-      return { found: false, accountBanned: false };
+      return { found: false, accountBanned: false, hadError: false };
     }
   } catch (err) {
     console.error("  [!] Genel hata:", err.message);
     await reportResult(id, "error", `Bot hatası: ${err.message} | Hesap: ${account.email}`);
-    return { found: false, accountBanned: false };
+    return { found: false, accountBanned: false, hadError: true };
   } finally {
     if (browser) try { await browser.close(); } catch {}
   }
@@ -2754,38 +2754,31 @@ async function main() {
         }, (readyAccounts.length > 0 ? readyAccounts : accounts)[0]);
 
         accountLastUsed.set(account.id, Date.now());
-        await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: ${getCurrentIp() || "doğrudan"}`);
+        await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: sıradaki proxy`);
         const result = await checkAppointments(config, account);
 
-        // IP engellendiyse hemen sonraki IP'ye geç ve kısa beklemeyle tekrar dene
+        // IP engellendiyse kısa bekleme ile sonraki döngüye geç (IP seçimi checkAppointments içinde round-robin)
         if (result.ipBlocked) {
-          console.log(`\n🔄 IP engellendi, 10s sonra yeni IP ile tekrar deneniyor...`);
-          await logStep(config.id, "ip_change", `IP değiştirildi → ${getCurrentIp() || "doğrudan"}`);
+          console.log(`\n🔄 IP engellendi, 10s sonra sıradaki IP ile tekrar deneniyor...`);
+          consecutiveErrors++;
+          await logStep(config.id, "ip_change", `IP engeli alındı, sıradaki IP otomatik denenecek`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
         }
 
-        if (result.found) { console.log("\n🎉 RANDEVU BULUNDU!"); consecutiveErrors = 0; }
-        else if (result.accountBanned) {
-          console.log(`\n⛔ Hesap banlı: ${account.email}`);
+        if (result.found) {
+          console.log("\n🎉 RANDEVU BULUNDU!");
+          consecutiveErrors = 0;
+        } else if (result.hadError) {
           consecutiveErrors++;
-          // Hata olunca da IP değiştir
-          if (IP_LIST.length > 0) {
-            const newIp = getNextIp();
-            await logStep(config.id, "ip_change", `Hata sonrası IP değişti → ${newIp || "doğrudan"}`);
+          await logStep(config.id, "ip_change", `Hata alındı, sıradaki IP otomatik denenecek`);
+          if (result.accountBanned) {
+            console.log(`\n⛔ Hesap banlı: ${account.email}`);
+          } else if (result.otpRequired) {
+            console.log(`\n📩 OTP gerekiyor: ${account.email}`);
           }
-        }
-        else {
-          if (result.otpRequired) {
-            consecutiveErrors++;
-            // OTP hatası olunca da IP değiştir
-            if (IP_LIST.length > 0) {
-              const newIp = getNextIp();
-              await logStep(config.id, "ip_change", `Hata sonrası IP değişti → ${newIp || "doğrudan"}`);
-            }
-          } else {
-            consecutiveErrors = 0;
-          }
+        } else {
+          consecutiveErrors = 0;
         }
 
         const baseInterval = Math.max(config.check_interval * 1000, CONFIG.BASE_INTERVAL_MS);
