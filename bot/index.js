@@ -2842,6 +2842,14 @@ async function main() {
       const pendingRegs = await fetchPendingRegistrations();
       if (pendingRegs.length > 0) {
         console.log(`\n📝 ${pendingRegs.length} bekleyen kayıt var`);
+        
+        // Log için aktif config ID al
+        let mainRegLogConfigId = null;
+        try {
+          const { configs: cfgs } = await fetchActiveConfigs();
+          if (cfgs.length > 0) mainRegLogConfigId = cfgs[0].id;
+        } catch {}
+        
         for (const reg of pendingRegs) {
           let regSuccess = false;
           let regAttempt = 0;
@@ -2851,12 +2859,12 @@ async function main() {
             regAttempt++;
             console.log(`\n  [REG] 🔄 Kayıt denemesi ${regAttempt}/${MAX_REG_ATTEMPTS} — ${reg.email}`);
             
-            // IP değiştir (ilk deneme dahil)
+            // İlk denemeden sonra IP değiştir
             if (regAttempt > 1) {
               const newIp = getNextIp();
               if (newIp) {
                 console.log(`  [REG] 🌐 IP değiştirildi: ${newIp}`);
-                await logStep(regLogConfigId, "ip_change", `Kayıt retry IP değişimi: ${newIp} | Deneme ${regAttempt} | ${reg.email}`);
+                await logStep(mainRegLogConfigId, "ip_change", `Kayıt retry IP değişimi: ${newIp} | Deneme ${regAttempt} | ${reg.email}`);
               }
               await delay(5000, 10000);
             }
@@ -2865,12 +2873,15 @@ async function main() {
             
             if (!regSuccess) {
               console.log(`  [REG] ❌ Deneme ${regAttempt} başarısız, IP değiştirip tekrar deneniyor...`);
+              await logStep(mainRegLogConfigId, "reg_fail", `Deneme ${regAttempt}/${MAX_REG_ATTEMPTS} başarısız — tekrar denenecek | ${reg.email}`);
               await delay(10000, 20000);
             }
           }
           
           if (!regSuccess) {
-            console.log(`  [REG] ⛔ ${reg.email} — ${MAX_REG_ATTEMPTS} denemede başarısız, sonraki hesaba geçiliyor`);
+            console.log(`  [REG] ⛔ ${reg.email} — ${MAX_REG_ATTEMPTS} denemede başarısız`);
+            await logStep(mainRegLogConfigId, "reg_fail", `${MAX_REG_ATTEMPTS} denemede başarısız, kayıt durduruluyor | ${reg.email}`);
+            await completeRegistration(reg.id, false);
           }
           
           await delay(10000, 20000);
