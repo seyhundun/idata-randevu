@@ -72,6 +72,14 @@ function markIpFail(ip) {
   }
 }
 
+function banIpImmediately(ip, reason = "") {
+  if (!ip) return;
+  ipBannedUntil.set(ip, Date.now() + IP_BAN_DURATION_MS);
+  ipFailCounts.set(ip, 0);
+  const reasonText = reason ? ` | Sebep: ${reason}` : "";
+  console.log(`  [IP] 🚫 ${ip} anında banlandı (${IP_BAN_DURATION_MS / 60000} dk)${reasonText}`);
+}
+
 function isPageBlocked(pageContent) {
   if (!pageContent || pageContent.trim().length < 100) return true; // boş sayfa
   const lower = pageContent.toLowerCase();
