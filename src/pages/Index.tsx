@@ -49,6 +49,8 @@ const Index = () => {
 
         <VfsAccounts />
 
+        <IdataAccounts />
+
         <TrackingLogs configId={t.configId} />
       </main>
     </div>
