@@ -1173,7 +1173,7 @@ async function checkAppointments(config, account) {
       await logStep(id, "login_fail", `OTP doğrulama gerekli | ${account.email}`);
       await reportResult(id, "error", `OTP doğrulama gerekli | Hesap: ${account.email}`, 0, otpResult.screenshot);
       await updateAccountStatus(account.id, "cooldown", (account.fail_count || 0) + 1);
-      return { found: false, accountBanned: false, otpRequired: true };
+      return { found: false, accountBanned: false, otpRequired: true, hadError: true };
     }
 
     // Login doğrulama
