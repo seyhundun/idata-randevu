@@ -850,6 +850,12 @@ async function scrapeCityOffices() {
     await page.goto(CONFIG.REGISTER_URL, { waitUntil: "networkidle2", timeout: 60000 });
     await delay(3000, 5000);
 
+    const cfAtRegisterOpen = await waitCloudflareBypass(page, "kayıt sayfası", 35000);
+    if (!cfAtRegisterOpen.ok) {
+      if (ip) markIpBanned(ip);
+      return false;
+    }
+
     // Cookie banner kapat
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll("button, a"));
@@ -861,7 +867,6 @@ async function scrapeCityOffices() {
     // İkametgah şehri select'ini bul
     const citySelect = await page.$('select[name*="city"], select[name*="sehir"], select[id*="city"], select[id*="residence"]');
     if (!citySelect) {
-      // Tüm select'lerden en uygununu bul
       const allSelects = await page.$$("select");
       console.log(`  [SCRAPE] ${allSelects.length} select bulundu, şehir select'i aranıyor...`);
     }
@@ -869,7 +874,6 @@ async function scrapeCityOffices() {
     // Tüm şehirleri al
     const cities = await page.evaluate(() => {
       const selects = Array.from(document.querySelectorAll("select"));
-      // İkametgah şehri — seçenekleri Türkiye şehirleri olan select
       const citySelect = selects.find(s => {
         const opts = Array.from(s.options).map(o => o.text.toLowerCase());
         return opts.some(t => t.includes("istanbul") || t.includes("ankara") || t.includes("izmir"));
@@ -882,7 +886,9 @@ async function scrapeCityOffices() {
 
     if (cities.length === 0) {
       console.log("  [SCRAPE] ❌ Şehir listesi bulunamadı");
-      return;
+      const state = await readPageState(page);
+      if (state.isCloudflare && ip) markIpBanned(ip);
+      return false;
     }
 
     console.log(`  [SCRAPE] ${cities.length} şehir bulundu`);
@@ -890,7 +896,6 @@ async function scrapeCityOffices() {
 
     for (const city of cities) {
       try {
-        // Şehir seç
         await page.evaluate((cityVal) => {
           const selects = Array.from(document.querySelectorAll("select"));
           const citySelect = selects.find(s => {
@@ -903,12 +908,10 @@ async function scrapeCityOffices() {
           }
         }, city.value);
 
-        await delay(1500, 3000); // Ofis dropdown yüklenmesini bekle
+        await delay(1500, 3000);
 
-        // Ofisleri oku
         const offices = await page.evaluate(() => {
           const selects = Array.from(document.querySelectorAll("select"));
-          // Ofis select'i — "ofis" içeren option'ları olan select
           const officeSelect = selects.find(s => {
             const opts = Array.from(s.options).map(o => o.text.toLowerCase());
             return opts.some(t => t.includes("ofis"));
@@ -922,11 +925,7 @@ async function scrapeCityOffices() {
         if (offices.length > 0) {
           console.log(`  [SCRAPE] ${city.text}: ${offices.map(o => o.text).join(", ")}`);
           for (const office of offices) {
-            allMappings.push({
-              city: city.text,
-              office_name: office.text,
-              office_value: office.value,
-            });
+            allMappings.push({ city: city.text, office_name: office.text, office_value: office.value });
           }
         }
       } catch (err) {
@@ -934,14 +933,17 @@ async function scrapeCityOffices() {
       }
     }
 
-    // DB'ye kaydet
     if (allMappings.length > 0) {
       await apiPost({ action: "sync_idata_city_offices", mappings: allMappings }, "sync_offices");
       console.log(`  [SCRAPE] ✅ ${allMappings.length} şehir-ofis eşleşmesi kaydedildi`);
+      return true;
     }
 
+    return false;
   } catch (err) {
     console.error("  [SCRAPE] Hata:", err.message);
+    if (ip) markIpBanned(ip);
+    return false;
   } finally {
     try { if (browser) await browser.close(); } catch {}
   }
