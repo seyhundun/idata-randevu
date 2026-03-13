@@ -98,6 +98,15 @@ export default function IdataTrackingLogs() {
   const [filter, setFilter] = useState<string>("all");
   const [configActive, setConfigActive] = useState(false);
 
+  const fetchConfig = async () => {
+    const { data } = await supabase
+      .from("idata_config" as any)
+      .select("is_active")
+      .limit(1)
+      .single();
+    if (data) setConfigActive((data as any).is_active);
+  };
+
   const fetchLogs = async () => {
     setLoading(true);
     const { data } = await supabase
