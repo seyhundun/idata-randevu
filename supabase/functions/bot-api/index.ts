@@ -186,8 +186,40 @@ Deno.serve(async (req) => {
           );
         }
 
+        // Bot syncs scraped city→office mappings
+        if (body.action === "sync_idata_city_offices") {
+          const { mappings } = body; // [{city, office_name, office_value}]
+          if (Array.isArray(mappings) && mappings.length > 0) {
+            for (const m of mappings) {
+              await supabase
+                .from("idata_city_offices")
+                .upsert(
+                  { city: m.city, office_name: m.office_name, office_value: m.office_value },
+                  { onConflict: "city,office_value" }
+                );
+            }
+          }
+          return new Response(
+            JSON.stringify({ ok: true, synced: mappings?.length || 0 }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
         // Bot marks iDATA registration complete or failed
         if (body.action === "complete_idata_registration") {
+          const { account_id, success } = body;
+          await supabase
+            .from("idata_accounts")
+            .update({
+              registration_status: success ? "completed" : "failed",
+              status: success ? "active" : "active",
+            })
+            .eq("id", account_id);
+          return new Response(
+            JSON.stringify({ ok: true }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
           const { account_id, success } = body;
           await supabase
             .from("idata_accounts")
