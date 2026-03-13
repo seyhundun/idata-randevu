@@ -155,8 +155,24 @@ function generateFingerprint() {
 const accountLastUsed = new Map();
 let consecutiveErrors = 0;
 
-function delay(min = 1000, max = 3000) {
+function delay(min = 2000, max = 5000) {
   return new Promise((r) => setTimeout(r, Math.floor(Math.random() * (max - min) + min)));
+}
+
+// İnsan benzeri scroll
+async function humanScroll(page) {
+  try {
+    const scrollAmount = Math.floor(Math.random() * 300) + 100;
+    const direction = Math.random() > 0.3 ? 1 : -1;
+    await page.evaluate((amount) => window.scrollBy({ top: amount, behavior: 'smooth' }), scrollAmount * direction);
+    await delay(800, 2000);
+  } catch {}
+}
+
+// İnsan benzeri idle (okuyormuş gibi)
+async function humanIdle(min = 2000, max = 6000) {
+  const wait = Math.floor(Math.random() * (max - min) + min);
+  await new Promise(r => setTimeout(r, wait));
 }
 
 async function humanMove(page) {
@@ -164,33 +180,53 @@ async function humanMove(page) {
     const vp = page.viewport();
     const w = vp?.width || 1366;
     const h = vp?.height || 768;
-    const x = Math.floor(Math.random() * w * 0.6 + w * 0.2);
-    const y = Math.floor(Math.random() * h * 0.6 + h * 0.2);
-    await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 10 + 5) });
-    await delay(100, 300);
+    // Birden fazla hareket yap — gerçek kullanıcı gibi
+    const moves = Math.floor(Math.random() * 3) + 1;
+    for (let i = 0; i < moves; i++) {
+      const x = Math.floor(Math.random() * w * 0.6 + w * 0.2);
+      const y = Math.floor(Math.random() * h * 0.6 + h * 0.2);
+      await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 20 + 10) });
+      await delay(300, 800);
+    }
+    // Bazen scroll da yap
+    if (Math.random() > 0.5) await humanScroll(page);
   } catch {}
 }
 
 async function humanType(page, target, text, options = {}) {
-  const { clearFirst = false, minDelay = 70, maxDelay = 220, pauseChance = 0.14, pauseMin = 220, pauseMax = 950 } = options;
+  const { clearFirst = false, minDelay = 120, maxDelay = 350, pauseChance = 0.2, pauseMin = 400, pauseMax = 1500 } = options;
   if (!text && text !== 0) return false;
   const element = typeof target === "string" ? await page.$(target) : target;
   if (!element) return false;
+  
+  // Alana tıklamadan önce biraz bekle (düşünme süresi)
+  await humanIdle(800, 2000);
   await element.click({ clickCount: 1 });
-  await delay(180, 450);
+  await delay(400, 900);
+  
   if (clearFirst) {
     await page.keyboard.down("Control");
     await page.keyboard.press("a");
     await page.keyboard.up("Control");
     await page.keyboard.press("Backspace");
-    await delay(120, 300);
+    await delay(300, 700);
   }
+  
   for (const ch of String(text)) {
     const keyDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
     await page.keyboard.type(ch, { delay: keyDelay });
+    // Daha sık ve uzun duraklamalar
     if (Math.random() < pauseChance) await delay(pauseMin, pauseMax);
+    // Bazen yanlış tuş bas ve düzelt (typo simülasyonu)
+    if (Math.random() < 0.03 && text.length > 5) {
+      const wrongKey = String.fromCharCode(97 + Math.floor(Math.random() * 26));
+      await page.keyboard.type(wrongKey, { delay: keyDelay });
+      await delay(300, 800);
+      await page.keyboard.press("Backspace");
+      await delay(200, 500);
+    }
   }
-  await delay(180, 420);
+  await delay(400, 1000);
   return true;
 }
 
@@ -951,7 +987,8 @@ async function checkAppointments(config, account) {
     // STEP 1: Giriş sayfası
     console.log("  [1/6] Giriş sayfası...");
     await page.goto(CONFIG.VFS_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
-    await delay(3000, 6000);
+    await humanIdle(4000, 8000); // Sayfa yüklendikten sonra okuyormuş gibi bekle
+    await humanMove(page);
     
     // IP engel kontrolü
     const pageContent = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
@@ -965,14 +1002,7 @@ async function checkAppointments(config, account) {
       return { found: false, accountBanned: false, ipBlocked: true };
     }
     markIpSuccess(activeIp);
-    await humanMove(page);
-    await applyFingerprint(page, fp);
-    await humanMove(page);
-
-    // STEP 1: Giriş sayfası
-    console.log("  [1/6] Giriş sayfası...");
-    await page.goto(CONFIG.VFS_URL, { waitUntil: "domcontentloaded", timeout: 90000 });
-    await delay(3000, 6000);
+    await humanScroll(page);
     await humanMove(page);
 
     // STEP 2: Cookie banner
@@ -1658,8 +1688,9 @@ async function registerVfsAccount(account) {
     const regUrl = CONFIG.VFS_URL.replace("/login", "/register");
     console.log("  [REG 1/7] Kayıt sayfası...");
     await page.goto(regUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
-    await delay(3000, 6000);
+    await humanIdle(5000, 10000); // Sayfayı okuyormuş gibi bekle
     await humanMove(page);
+    await humanScroll(page);
 
     // Cookie banner
     console.log("  [REG 2/7] Cookie banner...");
@@ -1672,17 +1703,18 @@ async function registerVfsAccount(account) {
         }) || document.getElementById('onetrust-accept-btn-handler') || null;
       });
       if (cookieBtn && cookieBtn.asElement()) {
-        await delay(500, 1500);
+        await humanIdle(1500, 3500); // Cookie uyarısını okuyormuş gibi
         await cookieBtn.asElement().click();
         console.log("  [REG 2/7] ✅ Cookie kabul edildi");
-        await delay(1000, 2000);
+        await delay(2000, 4000);
       }
     } catch (e) {}
 
     // CAPTCHA
     console.log("  [REG 3/7] CAPTCHA...");
+    await humanMove(page);
     await solveTurnstile(page);
-    await delay(2000, 4000);
+    await humanIdle(3000, 6000);
 
     // Form yüklenmesini bekle
     console.log("  [REG 4/7] Form bekleniyor...");
@@ -1693,24 +1725,35 @@ async function registerVfsAccount(account) {
       if (snapshot) console.log("  [REG] 📸 Form timeout screenshot alındı");
       throw new Error(registrationFormResult.reason);
     }
-    await delay(1800, 3200);
+    await humanIdle(3000, 6000); // Formu inceliyormuş gibi
+    await humanScroll(page);
+    await humanMove(page);
 
     // ========== FORM DOLDURMA ==========
     console.log("  [REG 5/7] Form dolduruluyor...");
 
     // Angular uyumlu input doldurma helper
     async function fillAngularInput(page, element, value) {
+      await humanIdle(600, 1500); // Alana tıklamadan önce düşünme süresi
       await element.click({ clickCount: 3 });
-      await delay(200, 400);
+      await delay(400, 800);
       await page.keyboard.press("Backspace");
-      await delay(100, 200);
-
-      // Önce humanType ile yaz
-      for (const ch of String(value)) {
-        await page.keyboard.type(ch, { delay: Math.floor(Math.random() * 150) + 50 });
-        if (Math.random() < 0.1) await delay(150, 400);
-      }
       await delay(200, 500);
+
+      // Daha yavaş ve insansı yazma
+      for (const ch of String(value)) {
+        await page.keyboard.type(ch, { delay: Math.floor(Math.random() * 200) + 80 });
+        if (Math.random() < 0.15) await delay(300, 900);
+        // Typo simülasyonu
+        if (Math.random() < 0.04 && value.length > 5) {
+          const wrongKey = String.fromCharCode(97 + Math.floor(Math.random() * 26));
+          await page.keyboard.type(wrongKey, { delay: 100 });
+          await delay(400, 1000);
+          await page.keyboard.press("Backspace");
+          await delay(200, 500);
+        }
+      }
+      await delay(500, 1200);
 
       // Angular reactive form event dispatch
       await page.evaluate((el, val) => {
@@ -1761,8 +1804,9 @@ async function registerVfsAccount(account) {
     if (!emailInput) throw new Error("Email alanı bulunamadı");
     const emailOk = await fillAngularInput(page, emailInput, account.email);
     console.log(`  [REG] ${emailOk ? "✅" : "⚠"} Email: ${account.email} (set: ${emailOk})`);
-    await delay(500, 1100);
+    await humanIdle(1500, 3500); // Email yazdıktan sonra düşünme
     await humanMove(page);
+    await humanScroll(page);
 
     // ŞİFRE + ONAY
     const passwordInputs = await page.$$('input[type="password"]');
@@ -1770,11 +1814,11 @@ async function registerVfsAccount(account) {
     if (passwordInputs.length < 2) throw new Error("Şifre alanları bulunamadı");
     for (let i = 0; i < passwordInputs.length; i++) {
       await fillAngularInput(page, passwordInputs[i], account.password);
-      await delay(450, 1000);
-      if (i === 0) await humanMove(page);
+      await humanIdle(1000, 2500);
+      if (i === 0) { await humanMove(page); await humanScroll(page); }
     }
     console.log("  [REG] ✅ Şifre girildi");
-    await delay(700, 1300);
+    await humanIdle(2000, 4000); // Şifre sonrası bekle
 
     // TELEFON
     let normalizedPhone = "";
@@ -1917,17 +1961,20 @@ async function registerVfsAccount(account) {
     }
 
     await humanMove(page);
-    await delay(1000, 2000);
+    await humanIdle(2000, 5000); // Telefon sonrası düşünme
 
     // CHECKBOX'LAR
     console.log("  [REG 6/7] Onay kutuları...");
+    await humanScroll(page); // Aşağı scroll — checkbox'ları görmek için
+    await humanIdle(1500, 3000);
     await tickAllCheckboxes(page);
-    await delay(1000, 2000);
+    await humanIdle(2000, 4000);
 
     // CAPTCHA
     console.log("  [REG] CAPTCHA kontrol...");
+    await humanMove(page);
     await solveTurnstile(page);
-    await delay(2000, 4000);
+    await humanIdle(3000, 6000);
 
     // Screenshot gönder (submit öncesi)
     const preSubmitSS = await takeScreenshotBase64(page);
