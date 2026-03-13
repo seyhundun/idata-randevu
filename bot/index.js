@@ -2805,6 +2805,7 @@ async function registerVfsAccount(account) {
       await postRegError(account, page, "OTP sonrası başarı sinyali bulunamadı");
     }
     await completeRegistration(account.id, success);
+    if (!success) return false; // retry loop tekrar deneyecek
     return success;
   } catch (err) {
     console.error("  [REG] Genel hata:", err.message);
