@@ -1868,6 +1868,7 @@ async function registerVfsAccount(account) {
 
     // CAPTCHA
     console.log("  [REG 3/7] CAPTCHA...");
+    await logStep(regLogConfigId, "reg_captcha", `CAPTCHA çözülüyor | ${account.email}`);
     await humanMove(page);
     await solveTurnstile(page);
     await humanIdle(3000, 6000);
@@ -1877,6 +1878,7 @@ async function registerVfsAccount(account) {
     const registrationFormResult = await waitForRegistrationFormAfterQueue(page);
     if (!registrationFormResult.ok) {
       const snapshot = await takeScreenshotBase64(page);
+      await logStep(regLogConfigId, "reg_fail", `Form yüklenemedi: ${registrationFormResult.reason} | ${account.email}`);
       await postRegError(account, page, registrationFormResult.reason);
       if (snapshot) console.log("  [REG] 📸 Form timeout screenshot alındı");
       throw new Error(registrationFormResult.reason);
@@ -1887,6 +1889,7 @@ async function registerVfsAccount(account) {
 
     // ========== FORM DOLDURMA ==========
     console.log("  [REG 5/7] Form dolduruluyor...");
+    await logStep(regLogConfigId, "reg_form", `Kayıt formu dolduruluyor | ${account.email}`);
 
     // Angular uyumlu input doldurma helper
     async function fillAngularInput(page, element, value) {
