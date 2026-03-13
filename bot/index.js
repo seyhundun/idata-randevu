@@ -1005,13 +1005,22 @@ async function checkAppointments(config, account) {
     const pageCheck = await page.evaluate(() => {
       const body = (document.body?.innerText || "").toLowerCase();
       const url = window.location.href.toLowerCase();
+      const loginBtn = Array.from(document.querySelectorAll("button")).find((b) => {
+        const txt = (b.textContent || "").toLowerCase();
+        return txt.includes("oturum") || txt.includes("sign in") || txt.includes("login") || txt.includes("giriş");
+      }) || document.querySelector('button[type="submit"]');
+
       return {
-        url, isNotFound: url.includes("page-not-found") || url.includes("404"),
+        url,
+        isNotFound: url.includes("page-not-found") || url.includes("404"),
         isSessionExpired: body.includes("oturum süresi doldu") || body.includes("session expired"),
         isBanned: body.includes("engellenmiş") || body.includes("blocked") || body.includes("banned"),
         isWaitingRoom: (document.title || "").toLowerCase().includes("waiting room"),
-        isLoginPage: url.includes("/login"), isDashboard: url.includes("/dashboard") || url.includes("/appointment"),
+        isLoginPage: url.includes("/login"),
+        isDashboard: url.includes("/dashboard") || url.includes("/appointment"),
         hasLoginForm: !!document.querySelector('input[type="email"], input[name="email"], #email'),
+        hasTurnstileWidget: !!document.querySelector('iframe[src*="challenges.cloudflare.com"], .cf-turnstile, [name*="turnstile"]'),
+        loginSubmitDisabled: !!loginBtn && (loginBtn.disabled || loginBtn.hasAttribute("disabled") || loginBtn.getAttribute("aria-disabled") === "true"),
       };
     });
     const isBanned = pageCheck.isBanned;
@@ -1024,6 +1033,7 @@ async function checkAppointments(config, account) {
       else if (pageCheck.isNotFound) errorType = "❌ Sayfa bulunamadı (404)";
       else if (pageCheck.isSessionExpired) errorType = "❌ Oturum süresi dolmuş";
       else if (pageCheck.isWaitingRoom) errorType = "❌ Hala waiting room'da";
+      else if (pageCheck.hasTurnstileWidget && pageCheck.loginSubmitDisabled) errorType = "❌ Turnstile doğrulanmadı (submit pasif)";
       else if (isLoginFailed) errorType = "❌ Giriş başarısız";
       console.log(`  [5/6] ${errorType} | Hesap: ${account.email}`);
       const ss = await takeScreenshotBase64(page);
