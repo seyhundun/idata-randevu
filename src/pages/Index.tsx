@@ -1,18 +1,16 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import ControlPanel from "@/components/ControlPanel";
 import StatusPanel from "@/components/StatusPanel";
 import ApplicantList from "@/components/ApplicantList";
 import TrackingLogs from "@/components/TrackingLogs";
 import VfsAccounts from "@/components/VfsAccounts";
-import IdataAccounts from "@/components/IdataAccounts";
-import IdataTrackingLogs from "@/components/IdataTrackingLogs";
-import IdataControlPanel from "@/components/IdataControlPanel";
 import { useTracking } from "@/hooks/useTracking";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { ExternalLink } from "lucide-react";
 
 const Index = () => {
   const t = useTracking();
-  const [activeTab, setActiveTab] = useState("vfs");
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] min-h-screen">
@@ -35,45 +33,36 @@ const Index = () => {
       />
 
       <main className="p-4 md:p-6 lg:p-8 space-y-6 overflow-y-auto max-h-screen">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="vfs" className="gap-1.5">
-              🌍 VFS Global
-            </TabsTrigger>
-            <TabsTrigger value="idata" className="gap-1.5">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold">🌍 VFS Global</h1>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/idata" className="gap-1.5">
               🇮🇹 iDATA İtalya
-            </TabsTrigger>
-          </TabsList>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </Button>
+        </div>
 
-          <TabsContent value="vfs" className="space-y-8 mt-6">
-            <StatusPanel
-              status={t.status}
-              country={t.country}
-              city={t.city}
-              elapsedSeconds={t.elapsedSeconds}
-              checksCount={t.checksCount}
-              onSimulateFound={t.simulateFound}
-              configId={t.configId}
-            />
+        <StatusPanel
+          status={t.status}
+          country={t.country}
+          city={t.city}
+          elapsedSeconds={t.elapsedSeconds}
+          checksCount={t.checksCount}
+          onSimulateFound={t.simulateFound}
+          configId={t.configId}
+        />
 
-            <ApplicantList
-              applicants={t.applicants}
-              onUpdate={t.updateApplicant}
-              personCount={t.personCount}
-              setPersonCount={t.setPersonCount}
-            />
+        <ApplicantList
+          applicants={t.applicants}
+          onUpdate={t.updateApplicant}
+          personCount={t.personCount}
+          setPersonCount={t.setPersonCount}
+        />
 
-            <VfsAccounts />
+        <VfsAccounts />
 
-            <TrackingLogs configId={t.configId} />
-          </TabsContent>
-
-          <TabsContent value="idata" className="space-y-8 mt-6">
-            <IdataControlPanel />
-            <IdataAccounts />
-            <IdataTrackingLogs />
-          </TabsContent>
-        </Tabs>
+        <TrackingLogs configId={t.configId} />
       </main>
     </div>
   );
