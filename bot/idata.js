@@ -1149,7 +1149,23 @@ async function mainLoop() {
             
             if (apptResult.found) {
               await idataLog("appt_found", `🎉 RANDEVU BULUNDU! | Hesap: ${account.email}`, apptResult.screenshot);
+              startAlarm(); // 🔔 Sesli alarm başlat
+              
+              // Randevu bulunduğunda hızlı döngüye geç (her 15sn kontrol)
+              console.log("  ⚡ Randevu bulundu! Hızlı kontrol moduna geçildi.");
+              while (true) {
+                await delay(15000, 20000);
+                const recheck = await checkAppointments(page, account);
+                if (recheck.found) {
+                  await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! | Hesap: ${account.email}`, recheck.screenshot);
+                } else {
+                  await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
+                  stopAlarm();
+                  break;
+                }
+              }
             } else {
+              stopAlarm(); // Alarm varsa kapat
               await idataLog("appt_none", `Randevu yok | ${apptResult.message || ""} | Hesap: ${account.email}`, apptResult.screenshot);
             }
           } else {
