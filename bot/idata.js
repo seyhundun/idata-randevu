@@ -57,6 +57,37 @@ function delay(min = 2000, max = 5000) {
   return new Promise(r => setTimeout(r, Math.floor(Math.random() * (max - min) + min)));
 }
 
+// ==================== AUDIO ALARM ====================
+const { exec } = require("child_process");
+let alarmInterval = null;
+
+function startAlarm() {
+  if (alarmInterval) return; // zaten çalıyor
+  console.log("\n🔔🔔🔔 ALARM: RANDEVU BULUNDU! 🔔🔔🔔");
+  
+  const playBeep = () => {
+    // Linux'ta beep sesi çal (birden fazla yöntem dene)
+    exec('echo -e "\\a"'); // Terminal bell
+    exec('for i in 1 2 3; do echo -e "\\a"; sleep 0.3; done'); // Üçlü bip
+    // aplay/paplay varsa wav çal
+    exec('command -v paplay && paplay /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga 2>/dev/null || command -v aplay && aplay /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null || echo -e "\\a\\a\\a"');
+    // Terminale büyük uyarı yaz
+    console.log("\n" + "=".repeat(60));
+    console.log("🚨🚨🚨  RANDEVU BULUNDU! HEMEN GİRİN!  🚨🚨🚨");
+    console.log("=".repeat(60) + "\n");
+  };
+  
+  playBeep(); // İlk çalma
+  alarmInterval = setInterval(playBeep, 10000); // Her 10sn tekrarla
+}
+
+function stopAlarm() {
+  if (alarmInterval) {
+    clearInterval(alarmInterval);
+    alarmInterval = null;
+  }
+}
+
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -1118,7 +1149,23 @@ async function mainLoop() {
             
             if (apptResult.found) {
               await idataLog("appt_found", `🎉 RANDEVU BULUNDU! | Hesap: ${account.email}`, apptResult.screenshot);
+              startAlarm(); // 🔔 Sesli alarm başlat
+              
+              // Randevu bulunduğunda hızlı döngüye geç (her 15sn kontrol)
+              console.log("  ⚡ Randevu bulundu! Hızlı kontrol moduna geçildi.");
+              while (true) {
+                await delay(15000, 20000);
+                const recheck = await checkAppointments(page, account);
+                if (recheck.found) {
+                  await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! | Hesap: ${account.email}`, recheck.screenshot);
+                } else {
+                  await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
+                  stopAlarm();
+                  break;
+                }
+              }
             } else {
+              stopAlarm(); // Alarm varsa kapat
               await idataLog("appt_none", `Randevu yok | ${apptResult.message || ""} | Hesap: ${account.email}`, apptResult.screenshot);
             }
           } else {

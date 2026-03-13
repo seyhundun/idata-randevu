@@ -97,6 +97,35 @@ export default function IdataTrackingLogs() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [configActive, setConfigActive] = useState(false);
+  const [appointmentFound, setAppointmentFound] = useState(false);
+  const [alarmDismissed, setAlarmDismissed] = useState(false);
+
+  // Dashboard sesli alarm
+  useEffect(() => {
+    if (!appointmentFound || alarmDismissed) return;
+    
+    // Web Audio API ile bip sesi oluştur
+    const playAlarm = () => {
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = "square";
+        gain.gain.value = 0.3;
+        osc.start();
+        setTimeout(() => { osc.frequency.value = 1100; }, 200);
+        setTimeout(() => { osc.frequency.value = 880; }, 400);
+        setTimeout(() => { osc.stop(); ctx.close(); }, 600);
+      } catch {}
+    };
+
+    playAlarm();
+    const interval = setInterval(playAlarm, 5000);
+    return () => clearInterval(interval);
+  }, [appointmentFound, alarmDismissed]);
 
   const fetchConfig = async () => {
     const { data } = await supabase
@@ -114,7 +143,12 @@ export default function IdataTrackingLogs() {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(100);
-    setLogs((data as unknown as LogEntry[] | null) ?? []);
+    const logList = (data as unknown as LogEntry[] | null) ?? [];
+    setLogs(logList);
+    // İlk yüklemede en son log appt_found ise alarm aç
+    if (logList.length > 0 && logList[0].status === "appt_found") {
+      setAppointmentFound(true);
+    }
     setLoading(false);
   };
 
@@ -127,7 +161,15 @@ export default function IdataTrackingLogs() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "idata_tracking_logs" },
         (payload) => {
-          setLogs((prev) => [payload.new as LogEntry, ...prev].slice(0, 100));
+          const newLog = payload.new as LogEntry;
+          setLogs((prev) => [newLog, ...prev].slice(0, 100));
+          if (newLog.status === "appt_found") {
+            setAppointmentFound(true);
+            setAlarmDismissed(false);
+          }
+          if (newLog.status === "appt_none" && !alarmDismissed) {
+            setAppointmentFound(false);
+          }
         }
       )
       .on(
@@ -172,6 +214,34 @@ export default function IdataTrackingLogs() {
 
   return (
     <div className="space-y-3">
+      {/* 🚨 RANDEVU BULUNDU ALARM BANNER */}
+      {appointmentFound && !alarmDismissed && (
+        <div className="relative overflow-hidden rounded-xl border-2 border-green-500 bg-green-500/10 p-4 animate-pulse">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-4xl">🎉</span>
+              <div>
+                <h3 className="text-lg font-bold text-green-600">RANDEVU BULUNDU!</h3>
+                <p className="text-sm text-green-600/80">Hemen giriş yapıp randevuyu alın!</p>
+                <a
+                  href="https://it-tr-appointment.idata.com.tr/tr/membership/dashboard/application/availability"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-2 px-4 py-2 rounded-lg bg-green-600 text-white font-semibold text-sm hover:bg-green-700 transition-colors"
+                >
+                  <Globe className="w-4 h-4" /> iDATA'ya Git
+                </a>
+              </div>
+            </div>
+            <button
+              onClick={() => setAlarmDismissed(true)}
+              className="absolute top-2 right-2 p-1 rounded-md hover:bg-green-500/20 transition-colors"
+            >
+              <X className="w-5 h-5 text-green-600" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Bot Status Bar */}
       <div className="flex items-center justify-between rounded-lg bg-card border border-border/50 px-4 py-3">
         <div className="flex items-center gap-3">
