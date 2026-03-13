@@ -904,19 +904,28 @@ async function applyFingerprint(page, fp) {
 }
 
 // ==================== BROWSER LAUNCH ====================
-async function launchBrowser() {
+async function launchBrowser(proxyIp = null) {
   const { connect } = require("puppeteer-real-browser");
+  const args = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--window-size=1366,768",
+  ];
+  
+  // IP rotasyonu: her IP için local SOCKS5 proxy kullan
+  if (proxyIp) {
+    const proxyPort = 10800 + IP_LIST.indexOf(proxyIp);
+    args.push(`--proxy-server=socks5://127.0.0.1:${proxyPort}`);
+    console.log(`  [BROWSER] 🌐 Proxy: socks5://127.0.0.1:${proxyPort} (IP: ${proxyIp})`);
+  }
+  
   const { browser, page } = await connect({
     headless: false,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--window-size=1366,768",
-    ],
+    args,
   });
-  console.log("  [BROWSER] ✅ Real browser başlatıldı (proxy yok)");
+  console.log(`  [BROWSER] ✅ Real browser başlatıldı ${proxyIp ? `(IP: ${proxyIp})` : "(proxy yok)"}`);
   return { browser, page };
 }
 
