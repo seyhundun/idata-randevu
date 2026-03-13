@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   CheckCircle2, Search, AlertCircle, Clock, Image as ImageIcon, X,
   LogIn, FormInput, ShieldCheck, KeyRound, Globe, Timer, MonitorSmartphone,
-  UserPlus, MousePointer, Wifi, Ban, RefreshCw
+  UserPlus, MousePointer, Wifi, Ban, RefreshCw, Network
 } from "lucide-react";
 
 interface LogEntry {
@@ -22,7 +22,12 @@ interface TrackingLogsProps {
 const statusConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
   // --- Bot lifecycle ---
   bot_start:      { icon: <MonitorSmartphone className="w-4 h-4" />, label: "Bot Başladı", color: "text-primary bg-primary/10" },
+  bot_stop:       { icon: <MonitorSmartphone className="w-4 h-4" />, label: "Bot Durdu", color: "text-muted-foreground bg-muted/50" },
   bot_idle:       { icon: <Timer className="w-4 h-4" />, label: "Bekleme", color: "text-muted-foreground bg-muted/50" },
+  
+  // --- IP ---
+  ip_change:      { icon: <Network className="w-4 h-4" />, label: "IP Değişti", color: "text-cyan-500 bg-cyan-500/10" },
+  ip_blocked:     { icon: <Ban className="w-4 h-4" />, label: "IP Engellendi", color: "text-red-500 bg-red-500/10" },
   
   // --- Login flow ---
   login_start:    { icon: <LogIn className="w-4 h-4" />, label: "Giriş Başladı", color: "text-blue-500 bg-blue-500/10" },
@@ -65,6 +70,20 @@ const statusConfig: Record<string, { icon: React.ReactNode; label: string; color
 };
 
 const defaultStatus = { icon: <Clock className="w-4 h-4" />, label: "Log", color: "text-muted-foreground bg-muted/50" };
+
+// Extract IP address from message
+function extractIp(message: string | null): string | null {
+  if (!message) return null;
+  const match = message.match(/IP:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/i);
+  return match ? match[1] : null;
+}
+
+// Extract account email from message
+function extractAccount(message: string | null): string | null {
+  if (!message) return null;
+  const match = message.match(/Hesap:\s*([^\s|]+@[^\s|]+)/i) || message.match(/\|\s*([^\s|]+@[^\s|]+)/);
+  return match ? match[1] : null;
+}
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -127,11 +146,20 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
 
   if (!configId) return null;
 
+  // Derive current IP and bot status from latest logs
+  const latestIpLog = logs.find((l) => extractIp(l.message));
+  const currentIp = latestIpLog ? extractIp(latestIpLog.message) : null;
+  const lastLogTime = logs[0]?.created_at;
+  const lastLogAge = lastLogTime ? (Date.now() - new Date(lastLogTime).getTime()) / 1000 : Infinity;
+  const botActive = lastLogAge < 300; // 5 min threshold
+  const lastBotStop = logs.find((l) => l.status === "bot_stop");
+
   const filters = [
     { key: "all", label: "Tümü" },
     { key: "login", label: "Giriş" },
     { key: "search", label: "Arama" },
     { key: "reg", label: "Kayıt" },
+    { key: "ip", label: "IP" },
     { key: "error", label: "Hatalar" },
   ];
 
@@ -140,26 +168,49 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
     if (filter === "login") return log.status.startsWith("login");
     if (filter === "search") return log.status.startsWith("search") || log.status === "checking" || log.status === "found" || log.status === "no_slots" || log.status === "queue_waiting";
     if (filter === "reg") return log.status.startsWith("reg");
-    if (filter === "error") return log.status === "error" || log.status.includes("fail") || log.status === "network_error";
+    if (filter === "ip") return log.status.startsWith("ip_") || log.status === "network_error" || log.status === "bot_start";
+    if (filter === "error") return log.status === "error" || log.status.includes("fail") || log.status === "network_error" || log.status === "ip_blocked";
     return true;
   });
 
   return (
     <div className="space-y-3">
+      {/* Bot Status Bar */}
+      <div className="flex items-center justify-between rounded-lg bg-card border border-border/50 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {botActive ? (
+              <>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                </span>
+                <span className="text-sm font-medium text-green-600">Bot Çalışıyor</span>
+              </>
+            ) : (
+              <>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-muted-foreground/40"></span>
+                </span>
+                <span className="text-sm font-medium text-muted-foreground">Bot Durdu</span>
+              </>
+            )}
+          </div>
+          {currentIp && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-500/10 border border-cyan-500/20">
+              <Network className="w-3.5 h-3.5 text-cyan-500" />
+              <span className="text-xs font-mono font-medium text-cyan-600">{currentIp}</span>
+            </div>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">{logs.length} kayıt</span>
+      </div>
+
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
           <MonitorSmartphone className="w-4 h-4 text-muted-foreground" />
           Canlı Bot Aktivitesi
         </h3>
-        <div className="flex items-center gap-1.5">
-          {logs.length > 0 && (
-            <span className="relative flex h-2.5 w-2.5 mr-1">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground">{logs.length} kayıt</span>
-        </div>
       </div>
 
       {/* Filter tabs */}
@@ -191,19 +242,35 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
         <div className="space-y-1 max-h-[500px] overflow-y-auto pr-1 font-mono">
           {filteredLogs.map((log) => {
             const cfg = statusConfig[log.status] ?? defaultStatus;
+            const ip = extractIp(log.message);
+            const account = extractAccount(log.message);
             return (
               <div
                 key={log.id}
                 className={`flex items-start gap-2.5 rounded-lg bg-card border border-border/50 px-3 py-2 text-xs transition-colors hover:bg-secondary/30 ${
                   log.status === "found" ? "ring-2 ring-green-500/30 bg-green-500/5" : ""
-                } ${log.status === "error" || log.status.includes("fail") ? "bg-destructive/5" : ""}`}
+                } ${log.status === "error" || log.status.includes("fail") || log.status === "ip_blocked" ? "bg-destructive/5" : ""
+                } ${log.status === "ip_change" ? "bg-cyan-500/5" : ""}`}
               >
                 <span className={`mt-0.5 flex items-center justify-center rounded-md p-1 shrink-0 ${cfg.color}`}>
                   {cfg.icon}
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`font-semibold ${cfg.color.split(" ")[0]}`}>{cfg.label}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`font-semibold ${cfg.color.split(" ")[0]}`}>{cfg.label}</span>
+                      {ip && (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600 text-[10px] font-mono">
+                          <Network className="w-3 h-3" />
+                          {ip}
+                        </span>
+                      )}
+                      {account && (
+                        <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                          {account}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-[10px] text-muted-foreground whitespace-nowrap tabular-nums">
                       {formatTime(log.created_at)} · {timeAgo(log.created_at)}
                     </span>

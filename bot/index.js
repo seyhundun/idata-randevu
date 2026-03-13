@@ -2678,14 +2678,33 @@ async function main() {
         continue;
       }
       if (configs.length === 0) {
-        console.log("\n⏸ Aktif görev yok. 60s sonra tekrar...");
-        await new Promise((r) => setTimeout(r, 60000));
+        console.log("\n⏸ Aktif görev yok. 30s sonra tekrar...");
+        await new Promise((r) => setTimeout(r, 30000));
         continue;
       }
 
       console.log(`\n📊 ${accounts.length} aktif hesap, ${configs.length} aktif görev`);
 
       for (const config of configs) {
+        // Her döngüde aktiflik kontrolü — dashboard'dan durdurulmuş olabilir
+        const { data: freshConfig } = await fetchApiJson(
+          { method: "GET", headers: apiHeaders }, "check_active"
+        ).catch(() => ({ data: null }));
+        
+        // Config hala aktif mi kontrol et
+        let stillActive = true;
+        try {
+          const freshData = await apiGet("check_config_active");
+          const activeConfig = (freshData.configs || []).find(c => c.id === config.id);
+          if (!activeConfig) {
+            stillActive = false;
+            console.log(`\n⏹ Görev durduruldu: ${config.id.substring(0, 8)}...`);
+            await logStep(config.id, "bot_stop", "Takip dashboard'dan durduruldu");
+          }
+        } catch {}
+        
+        if (!stillActive) continue;
+
         // Screenshot talep kontrolü
         if (config.screenshot_requested) {
           console.log(`\n📸 Screenshot talebi algılandı (${config.id.substring(0, 8)}...)`);
@@ -2722,6 +2741,7 @@ async function main() {
           const lastUsed = accountLastUsed.get(oldestUsed.id) || 0;
           const waitMs = Math.max(0, CONFIG.MIN_ACCOUNT_GAP_MS - (now - lastUsed));
           console.log(`\n⏳ Tüm hesaplar yakın zamanda kullanıldı. ${Math.round(waitMs / 1000)}s bekleniyor...`);
+          await logStep(config.id, "bot_idle", `Hesap bekleme: ${Math.round(waitMs / 1000)}s`);
           await new Promise((r) => setTimeout(r, waitMs));
         }
 
@@ -2736,6 +2756,7 @@ async function main() {
         }, (readyAccounts.length > 0 ? readyAccounts : accounts)[0]);
 
         accountLastUsed.set(account.id, Date.now());
+        await logStep(config.id, "account_switch", `Hesap: ${account.email} | IP: ${getCurrentIp() || "doğrudan"}`);
         const result = await checkAppointments(config, account);
 
         // IP engellendiyse hemen sonraki IP'ye geç ve kısa beklemeyle tekrar dene
@@ -2755,6 +2776,7 @@ async function main() {
         const jitter = Math.floor(Math.random() * 60000) + 15000;
         const wait = Math.round(interval + jitter);
         console.log(`\n⏳ Sonraki: ${Math.round(wait / 1000)}s (backoff: x${backoffMultiplier.toFixed(1)}, errors: ${consecutiveErrors})`);
+        await logStep(config.id, "bot_idle", `Sonraki kontrol: ${Math.round(wait / 1000)}s | IP: ${getCurrentIp() || "doğrudan"}`);
         await new Promise((r) => setTimeout(r, wait));
       }
     } catch (err) {
