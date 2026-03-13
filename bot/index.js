@@ -1766,6 +1766,47 @@ async function waitForRegistrationOtp(accountId, otpType, timeoutMs = 180000) {
   return null;
 }
 
+async function signalCaptchaWaiting(accountId) {
+  try {
+    await supabase.from("vfs_accounts").update({
+      captcha_waiting_at: new Date().toISOString(),
+      captcha_manual_approved: false,
+    }).eq("id", accountId);
+    console.log("  [REG] 🛑 CAPTCHA bekleme sinyali gönderildi — dashboard'dan onay bekleniyor");
+  } catch (e) {
+    console.warn("  [REG] captcha_waiting_at set hatası:", e.message);
+  }
+}
+
+async function clearCaptchaWaiting(accountId) {
+  try {
+    await supabase.from("vfs_accounts").update({
+      captcha_waiting_at: null,
+      captcha_manual_approved: false,
+    }).eq("id", accountId);
+  } catch (e) {}
+}
+
+async function waitForCaptchaManualApproval(accountId, timeoutMs = 120000) {
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeoutMs) {
+    const { data } = await supabase
+      .from("vfs_accounts")
+      .select("captcha_manual_approved")
+      .eq("id", accountId)
+      .single();
+    if (data?.captcha_manual_approved) {
+      console.log("  [REG] ✅ Dashboard'dan manuel devralma onayı alındı!");
+      return true;
+    }
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`  [REG] Manuel onay bekleniyor... ${elapsed}s/${Math.round(timeoutMs / 1000)}s`);
+    await delay(4000, 5000);
+  }
+  console.log("  [REG] ❌ Manuel onay zaman aşımı");
+  return false;
+}
+
 function normalizePhoneNumber(rawPhone) {
   const digits = String(rawPhone || "").replace(/\D/g, "");
   let mobileNumber = digits;
