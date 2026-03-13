@@ -2328,11 +2328,13 @@ async function registerVfsAccount(account) {
 
     // OTP DOĞRULAMA
     console.log("  [REG] OTP doğrulama kontrol...");
+    await logStep(regLogConfigId, "reg_otp_wait", `Form gönderildi, OTP ekranı bekleniyor | ${account.email}`);
     const otpScreen = await waitForOtpScreenAfterSubmit(page, 45000);
 
     if (!otpScreen.ok) {
       const pageText = otpScreen.pageTextPreview || await page.evaluate(() => (document.body?.innerText || '').substring(0, 300));
       console.log("  [REG] Sayfa durumu:", pageText.substring(0, 200));
+      await logStep(regLogConfigId, "reg_fail", `OTP ekranı bulunamadı | ${account.email}`);
       await postRegError(account, page, "OTP ekranı bulunamadı (submit sonrası)");
       await completeRegistration(account.id, false);
       return false;
@@ -2343,6 +2345,7 @@ async function registerVfsAccount(account) {
       return (t.includes("sms") || t.includes("mobile") || t.includes("telefon")) ? "sms" : "email";
     });
     console.log(`  [REG] 📱 ${otpType.toUpperCase()} OTP bekleniyor - dashboard'dan girin`);
+    await logStep(regLogConfigId, "reg_otp_wait", `${otpType.toUpperCase()} OTP bekleniyor — dashboard'dan girin | ${account.email}`);
 
     const otp = await waitForRegistrationOtp(account.id, otpType, 180000);
     if (!otp) {
