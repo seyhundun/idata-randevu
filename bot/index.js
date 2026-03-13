@@ -1001,6 +1001,7 @@ async function checkAppointments(config, account) {
   const activeIp = getCurrentIp();
   console.log(`\n[${ts}] Kontrol: ${country} ${city} | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
   await logStep(id, "bot_start", `Kontrol başlıyor | Hesap: ${account.email} | IP: ${activeIp || "doğrudan"}`);
+  await logStep(id, "ip_change", `Aktif IP: ${activeIp || "doğrudan"} | Hesap: ${account.email}`);
 
   let browser;
   try {
