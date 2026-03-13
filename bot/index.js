@@ -589,8 +589,7 @@ async function tryClickTurnstileCheckbox(page) {
             console.log("  [CAPTCHA] ✅ Turnstile checkbox tıklandı ve token alındı");
             return true;
           }
-          console.log("  [CAPTCHA] ✅ Turnstile iframe tıklandı (token bekleniyor)");
-          return true;
+          console.log("  [CAPTCHA] ⚠ Turnstile tıklandı ama token gelmedi");
         } catch {}
       }
     }
@@ -612,8 +611,7 @@ async function tryClickTurnstileCheckbox(page) {
           console.log("  [CAPTCHA] ✅ Turnstile iframe merkez tıklandı ve token alındı");
           return true;
         }
-        console.log("  [CAPTCHA] ✅ Turnstile iframe merkez tıklandı");
-        return true;
+        console.log("  [CAPTCHA] ⚠ Turnstile iframe tıklandı ama token gelmedi");
       }
     }
   } catch {}
