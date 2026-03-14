@@ -1501,6 +1501,7 @@ async function launchBrowser(proxyIp = null) {
   const { browser, page } = await connect({
     headless: false,
     args,
+    turnstile: true,
   });
   
   // Residential proxy auth
