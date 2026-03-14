@@ -129,10 +129,6 @@ const Index = () => {
                       />
                     </SidebarSection>
 
-                    <SidebarSection icon={<Monitor className="w-3.5 h-3.5" />} title="Canlı Ekran (VNC)" defaultOpen={false}>
-                      <VncViewer title="VFS Bot Ekranı" defaultPort={6080} />
-                    </SidebarSection>
-
                     <SidebarSection icon={<Settings className="w-3.5 h-3.5" />} title="Bot & Ülke Ayarları">
                       <BotSettingsPanel />
                     </SidebarSection>
@@ -145,6 +141,12 @@ const Index = () => {
             <main className="flex-1 min-w-0">
               <ScrollArea className="h-full">
                 <div className="p-4 md:p-6 space-y-5 max-w-[1400px]">
+                  {/* VNC Canlı Ekranlar */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <VncViewer title="🌍 VFS Bot Ekranı" defaultPort={6080} />
+                    <VncViewer title="🇮🇹 iDATA Bot Ekranı" defaultPort={6081} />
+                  </div>
+
                   {/* Top cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <ModuleStatus
@@ -197,9 +199,6 @@ const Index = () => {
                   <div className="p-3 space-y-1">
                     <SidebarSection icon={<Settings className="w-3.5 h-3.5" />} title="iDATA Kontrol Paneli" defaultOpen>
                       <IdataControlPanel />
-                    </SidebarSection>
-                    <SidebarSection icon={<Monitor className="w-3.5 h-3.5" />} title="Canlı Ekran (VNC)" defaultOpen={false}>
-                      <VncViewer title="iDATA Bot Ekranı" defaultPort={6081} />
                     </SidebarSection>
                     <SidebarSection icon={<Globe className="w-3.5 h-3.5" />} title="Bot & Ülke Ayarları">
                       <BotSettingsPanel />
