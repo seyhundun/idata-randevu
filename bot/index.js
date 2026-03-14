@@ -1160,14 +1160,15 @@ async function solveTurnstile(page) {
     return false;
   }
 
-  if (context.sitekey && CONFIG.CAPTCHA_API_KEY) {
+  const hasAnyCaptchaKey = CONFIG.CAPTCHA_API_KEY || CAPSOLVER_API_KEY;
+  if (context.sitekey && hasAnyCaptchaKey) {
     const solved = await _solve(page, context);
     if (solved) return true;
   }
 
-  if (!context.sitekey && CONFIG.CAPTCHA_API_KEY) {
+  if (!context.sitekey && hasAnyCaptchaKey) {
     console.log("  [CAPTCHA] Sitekey bulunamadı, iframe click fallback deneniyor...");
-  } else if (!CONFIG.CAPTCHA_API_KEY) {
+  } else if (!hasAnyCaptchaKey) {
     console.log("  [CAPTCHA] API key yok, yalnızca iframe click deneniyor...");
   }
 
