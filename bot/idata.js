@@ -866,26 +866,33 @@ async function solveImageCaptcha(page, options = {}) {
         }
       }
 
-      // Görsel yüklendi, screenshot al
+      // Görsel yakalama
       const capture = await getCaptchaImageBase64(page);
       const captchaImgBase64 = capture?.base64;
+      const captchaMeta = capture?.meta || {};
+
+      // Detaylı debug logu
+      await idataLog(
+        "login_captcha_debug",
+        `Deneme ${attempt}/${maxAttempts} | kind=${captchaMeta.kind || "?"} | score=${captchaMeta.score ?? "?"} | w=${captchaMeta.width || 0} h=${captchaMeta.height || 0} | src=${(captchaMeta.src || "").slice(0, 60)} | reason=${capture?.reason || "ok"} | b64=${captchaImgBase64 ? captchaImgBase64.length + " chars" : "null"}`
+      );
 
       if (!captchaImgBase64) {
         console.log(`  [CAPTCHA] ⚠ Captcha base64 alınamadı (deneme ${attempt}/${maxAttempts}): ${capture?.reason || "unknown"}`);
-        await idataLog("login_captcha", `CAPTCHA base64 alınamadı: ${capture?.reason || "unknown"}`);
+        await idataLog("login_captcha", `CAPTCHA base64 alınamadı: ${capture?.reason || "unknown"} | kind=${captchaMeta.kind || "?"}`);
         await delay(1200, 2000);
         continue;
       }
 
-      console.log(`  [CAPTCHA] 📸 Captcha resmi bulundu (score=${capture?.meta?.score ?? "?"}), çözüm başlıyor...`);
+      console.log(`  [CAPTCHA] 📸 Captcha resmi bulundu (kind=${captchaMeta.kind} score=${captchaMeta.score ?? "?"}), çözüm başlıyor...`);
 
-      // Capsolver / 2captcha (AI devre dışı)
+      // Capsolver / 2captcha
       const useCapsolver = !!CAPSOLVER_API_KEY && (CAPTCHA_PROVIDER === "capsolver" || CAPTCHA_PROVIDER === "auto");
       const use2captcha = !!CONFIG.CAPTCHA_API_KEY && (CAPTCHA_PROVIDER === "2captcha" || CAPTCHA_PROVIDER === "auto");
 
       await idataLog(
         "login_captcha",
-        `CAPTCHA deneme ${attempt}/${maxAttempts} | provider=${CAPTCHA_PROVIDER} | capsolver=${useCapsolver ? "on" : "off"} | 2captcha=${use2captcha ? "on" : "off"}`
+        `CAPTCHA deneme ${attempt}/${maxAttempts} | kind=${captchaMeta.kind || "?"} | provider=${CAPTCHA_PROVIDER} | capsolver=${useCapsolver ? "on" : "off"} | 2captcha=${use2captcha ? "on" : "off"}`
       );
 
       if (!useCapsolver && !use2captcha) {
