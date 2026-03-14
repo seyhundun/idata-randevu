@@ -41,10 +41,12 @@ export default function BotSettingsPanel() {
   const [showCaptchaKey, setShowCaptchaKey] = useState(false);
   const [currentIp, setCurrentIp] = useState<string | null>(null);
   const [lastIpReset, setLastIpReset] = useState<string | null>(null);
-  const [evomiRegions, setEvomiRegions] = useState<string[]>([]);
+  const [evomiRegions, setEvomiRegions] = useState<{ id: string; name: string }[]>([]);
   const [evomiCities, setEvomiCities] = useState<{ name: string; region?: string }[]>([]);
+  const [evomiCountries, setEvomiCountries] = useState<{ code: string; name: string }[]>([]);
   const [loadingRegions, setLoadingRegions] = useState(false);
   const [regionPopoverOpen, setRegionPopoverOpen] = useState(false);
+  const [countryPopoverOpen, setCountryPopoverOpen] = useState(false);
 
   // Local draft state for editable fields
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -108,9 +110,13 @@ export default function BotSettingsPanel() {
       });
       if (error) throw error;
       if (data?.ok) {
-        setEvomiRegions(data.regions || []);
+        setEvomiRegions((data.regions || []).map((r: any) => typeof r === "string" ? { id: r, name: r } : { id: r.id || r.name, name: r.name || r.id }));
         setEvomiCities(data.cities || []);
-        toast.success(`${(data.regions || []).length} bölge, ${(data.cities || []).length} şehir yüklendi`);
+        // Parse countries object { "TR": "Turkey", "DE": "Germany", ... }
+        const countriesObj = data.countries || {};
+        const countriesList = Object.entries(countriesObj).map(([code, name]) => ({ code, name: String(name) })).sort((a, b) => a.name.localeCompare(b.name));
+        setEvomiCountries(countriesList);
+        toast.success(`${(data.regions || []).length} bölge, ${countriesList.length} ülke yüklendi`);
       } else {
         toast.error(data?.error || "Bölge listesi alınamadı");
       }
@@ -193,15 +199,16 @@ export default function BotSettingsPanel() {
     toast.info(`${label} silindi`);
   };
 
-  const proxyCountries = [
-    { code: "TR", label: "🇹🇷 Türkiye" },
-    { code: "PL", label: "🇵🇱 Polonya" },
-    { code: "DE", label: "🇩🇪 Almanya" },
-    { code: "NL", label: "🇳🇱 Hollanda" },
-    { code: "FR", label: "🇫🇷 Fransa" },
-    { code: "GB", label: "🇬🇧 İngiltere" },
-    { code: "US", label: "🇺🇸 ABD" },
+  const defaultProxyCountries = [
+    { code: "TR", name: "Türkiye" },
+    { code: "PL", name: "Polonya" },
+    { code: "DE", name: "Almanya" },
+    { code: "NL", name: "Hollanda" },
+    { code: "FR", name: "Fransa" },
+    { code: "GB", name: "İngiltere" },
+    { code: "US", name: "ABD" },
   ];
+  const activeProxyCountries = evomiCountries.length > 0 ? evomiCountries : defaultProxyCountries;
 
   return (
     <Card className="p-4 space-y-5">
@@ -390,16 +397,12 @@ export default function BotSettingsPanel() {
                         <Check className={`mr-2 h-3 w-3 ${!getDraft("proxy_region") ? "opacity-100" : "opacity-0"}`} />
                         Yok (rastgele)
                       </CommandItem>
-                      {evomiRegions.map((r, i) => {
-                        const val = typeof r === "string" ? r : (r as any).name || (r as any).id || String(i);
-                        const label = typeof r === "string" ? r : (r as any).name || JSON.stringify(r);
-                        return (
-                          <CommandItem key={val + i} value={val} onSelect={() => { setDraftValue("proxy_region", val); setRegionPopoverOpen(false); }}>
-                            <Check className={`mr-2 h-3 w-3 ${getDraft("proxy_region") === val ? "opacity-100" : "opacity-0"}`} />
-                            {label}
+                      {evomiRegions.map((r) => (
+                          <CommandItem key={r.id} value={`${r.id} ${r.name}`} onSelect={() => { setDraftValue("proxy_region", r.id); setRegionPopoverOpen(false); }}>
+                            <Check className={`mr-2 h-3 w-3 ${getDraft("proxy_region") === r.id ? "opacity-100" : "opacity-0"}`} />
+                            {r.name}
                           </CommandItem>
-                        );
-                      })}
+                        ))}
                     </CommandGroup>
                   </CommandList>
                 </Command>
@@ -436,27 +439,58 @@ export default function BotSettingsPanel() {
         </div>
       </div>
 
-      {/* Proxy Country */}
       <div className="space-y-2 border-t border-border pt-4">
-        <Label className="text-xs font-medium flex items-center gap-1.5">
-          <Globe className="w-3 h-3 text-muted-foreground" />
-          Proxy Ülkesi (Evomi IP Lokasyonu)
-        </Label>
-        <div className="flex flex-wrap gap-1.5">
-          {proxyCountries.map(pc => (
-            <button
-              key={pc.code}
-              onClick={() => updateProxyCountry(pc.code)}
-              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
-                getDraft("proxy_country") === pc.code
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-secondary text-foreground hover:bg-secondary/80"
-              }`}
-            >
-              {pc.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium flex items-center gap-1.5">
+            <Globe className="w-3 h-3 text-muted-foreground" />
+            Proxy Ülkesi (Evomi IP Lokasyonu)
+          </Label>
+          {evomiCountries.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">{evomiCountries.length} ülke (API)</span>
+          )}
         </div>
+        {evomiCountries.length > 0 ? (
+          <Popover open={countryPopoverOpen} onOpenChange={setCountryPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" className="h-8 text-xs justify-between w-full font-mono">
+                {getDraft("proxy_country") ? `${getDraft("proxy_country")} — ${evomiCountries.find(c => c.code === getDraft("proxy_country"))?.name || getDraft("proxy_country")}` : "Ülke seçin..."}
+                <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Ülke ara..." className="h-8 text-xs" />
+                <CommandList>
+                  <CommandEmpty>Sonuç bulunamadı</CommandEmpty>
+                  <CommandGroup>
+                    {activeProxyCountries.map(pc => (
+                      <CommandItem key={pc.code} value={`${pc.code} ${pc.name}`} onSelect={() => { updateProxyCountry(pc.code); setCountryPopoverOpen(false); }}>
+                        <Check className={`mr-2 h-3 w-3 ${getDraft("proxy_country") === pc.code ? "opacity-100" : "opacity-0"}`} />
+                        {pc.code} — {pc.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {defaultProxyCountries.map(pc => (
+              <button
+                key={pc.code}
+                onClick={() => updateProxyCountry(pc.code)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  getDraft("proxy_country") === pc.code
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-secondary text-foreground hover:bg-secondary/80"
+                }`}
+              >
+                {pc.code} — {pc.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Save Button */}
