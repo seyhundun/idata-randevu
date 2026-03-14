@@ -198,6 +198,9 @@ const Index = () => {
                     <SidebarSection icon={<Settings className="w-3.5 h-3.5" />} title="iDATA Kontrol Paneli" defaultOpen>
                       <IdataControlPanel />
                     </SidebarSection>
+                    <SidebarSection icon={<Monitor className="w-3.5 h-3.5" />} title="Canlı Ekran (VNC)" defaultOpen={false}>
+                      <VncViewer title="iDATA Bot Ekranı" defaultPort={6081} />
+                    </SidebarSection>
                     <SidebarSection icon={<Globe className="w-3.5 h-3.5" />} title="Bot & Ülke Ayarları">
                       <BotSettingsPanel />
                     </SidebarSection>
