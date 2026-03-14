@@ -8,6 +8,7 @@ export function useTracking() {
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
   const [visaCategory, setVisaCategory] = useState("");
+  const [visaSubcategory, setVisaSubcategory] = useState("");
   const [personCount, setPersonCount] = useState(1);
   const [interval, setIntervalValue] = useState(120);
   const [applicants, setApplicants] = useState<Applicant[]>([
