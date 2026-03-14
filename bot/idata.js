@@ -1963,9 +1963,10 @@ async function loginToIdata(page, account) {
       await apiPost({ action: "idata_set_login_otp_requested", account_id: account.id }, "set_login_otp");
       await idataLog("login_otp", `📧 Giriş OTP bekleniyor | Hesap: ${account.email}`);
 
-      // Dashboard'dan OTP'yi bekle (max 3 dakika)
-      console.log("  [LOGIN] ⏳ Dashboard'dan OTP bekleniyor (max 180s)...");
-      const otpCode = await waitForLoginOtp(account.id, 180000);
+      // Dashboard'dan OTP'yi bekle (max 3 dakika) — IMAP varsa otomatik dene
+      const hasImap = !!(account.imap_password);
+      console.log(`  [LOGIN] ⏳ OTP bekleniyor (max 180s) | IMAP: ${hasImap ? 'aktif' : 'yok'}...`);
+      const otpCode = await waitForLoginOtp(account.id, 180000, hasImap);
       
       if (!otpCode) {
         console.log("  [LOGIN] ❌ OTP zaman aşımı");
