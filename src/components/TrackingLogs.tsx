@@ -125,6 +125,13 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
     setLoading(false);
   };
 
+  const clearLogs = async () => {
+    if (!configId) return;
+    if (!confirm("Tüm VFS loglarını silmek istediğinize emin misiniz?")) return;
+    await supabase.from("tracking_logs").delete().eq("config_id", configId);
+    setLogs([]);
+  };
+
   useEffect(() => {
     fetchLogs();
     if (!configId) return;
