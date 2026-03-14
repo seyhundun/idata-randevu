@@ -1577,15 +1577,31 @@ async function loginToIdata(page, account) {
     }
     await delay(900, 1400);
 
-    // Giriş butonu
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
-      const loginBtn = btns.find(b => {
-        const txt = (b.textContent || b.value || "").toLowerCase();
-        return txt.includes("giriş") || txt.includes("login") || txt.includes("oturum");
-      }) || document.querySelector('button[type="submit"]');
-      if (loginBtn) loginBtn.click();
+    // Giriş butonu — geniş seçici (button, input, a, span dahil)
+    const loginClicked = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a, [role='button']"));
+      const loginBtn = candidates.find(b => {
+        const txt = (b.textContent || b.value || b.getAttribute("value") || "").trim().toLowerCase().normalize("NFC");
+        return /^giri[sş]$/i.test(txt) || txt === "login" || txt === "oturum aç" || txt === "sign in";
+      });
+      // Fallback: submit button veya form submit
+      const fallback = document.querySelector('button[type="submit"], input[type="submit"]');
+      const target = loginBtn || fallback;
+      if (target) {
+        target.click();
+        return { found: true, tag: target.tagName, text: (target.textContent || target.value || "").trim().slice(0, 30) };
+      }
+      // Son fallback: formu direkt submit et
+      const form = document.querySelector("form");
+      if (form) { form.submit(); return { found: true, tag: "FORM", text: "form.submit()" }; }
+      return { found: false };
     });
+    console.log(`  [LOGIN] Giriş butonu:`, loginClicked);
+    await idataLog("login_form", `Giriş butonu: ${loginClicked?.found ? `${loginClicked.tag} "${loginClicked.text}"` : "BULUNAMADI!"}`);
+    if (!loginClicked?.found) {
+      const ss = await takeScreenshotBase64(page);
+      await idataLog("login_fail", `Giriş butonu bulunamadı!`, ss);
+    }
 
     await delay(5000, 8000);
 
