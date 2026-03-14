@@ -492,6 +492,7 @@ export default function IdataAccounts() {
                      {acc.passport_no && <span className="text-xs text-muted-foreground">🛂 {acc.passport_no}</span>}
                      {acc.membership_number && <span className="text-xs text-muted-foreground font-mono">🆔 {acc.membership_number}</span>}
                      {acc.idata_office && <span className="text-xs text-muted-foreground">🏢 {acc.idata_office}</span>}
+                     {acc.imap_password && <Badge className="bg-green-500/10 text-green-600 border-green-500/20 text-[10px]">📧 IMAP</Badge>}
                   </div>
                 </div>
                 <div className="flex gap-1.5 shrink-0">
