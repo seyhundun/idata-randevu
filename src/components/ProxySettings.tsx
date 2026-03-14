@@ -11,6 +11,8 @@ interface ProxySettingsProps {
 export default function ProxySettings({ configId }: ProxySettingsProps) {
   const [currentIp, setCurrentIp] = useState<string | null>(null);
   const [lastReset, setLastReset] = useState<string | null>(null);
+  const [proxyHost, setProxyHost] = useState("—");
+  const [proxyCountry, setProxyCountry] = useState("—");
   const [cfStatus, setCfStatus] = useState<{ blocked: boolean; ip: string | null; since: string | null }>({
     blocked: false, ip: null, since: null,
   });
