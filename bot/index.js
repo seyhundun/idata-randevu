@@ -1,7 +1,7 @@
 /**
- * VFS Global Randevu Takip Botu v7.1
+ * VFS Global Randevu Takip Botu v8.1
  * puppeteer-real-browser + Fingerprint + Kayıt Otomasyonu
- * IP Rotasyonu + Fingerprint + Kayıt Otomasyonu
+ * IP Rotasyonu + Residential Proxy + Kayıt Otomasyonu
  */
 
 require("dotenv").config();
