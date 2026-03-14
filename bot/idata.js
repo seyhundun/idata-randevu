@@ -697,24 +697,80 @@ async function refreshCaptchaImage(page) {
 }
 
 async function solveImageCaptcha(page, options = {}) {
-  const { maxAttempts = 3 } = options;
+  const { maxAttempts = 4 } = options;
   const fetch = (await import("node-fetch")).default;
+  let pageReloaded = false;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       if (attempt > 1) {
         console.log(`  [CAPTCHA] 🔁 Yeni deneme ${attempt}/${maxAttempts}...`);
         const refreshed = await refreshCaptchaImage(page);
-        if (refreshed) await delay(1800, 2800);
+        if (refreshed) {
+          console.log("  [CAPTCHA] Resim yenileme butonu tıklandı, bekleniyor...");
+          await delay(2500, 4000);
+        } else {
+          await delay(1200, 2000);
+        }
       } else {
-        await delay(1200, 2200);
+        await delay(1500, 2500);
       }
 
+      // CAPTCHA görselinin yüklenmesini bekle (max 8sn)
+      console.log("  [CAPTCHA] Görsel yüklenmesi bekleniyor...");
+      const loadStatus = await waitForCaptchaImageLoad(page, 8000);
+      console.log(`  [CAPTCHA] Görsel durumu: found=${loadStatus.found} loaded=${loadStatus.loaded} w=${loadStatus.naturalWidth || 0} h=${loadStatus.naturalHeight || 0} reason=${loadStatus.reason}`);
+
+      // Görsel yüklenmemişse → yenileme dene
+      if (!loadStatus.loaded) {
+        console.log(`  [CAPTCHA] ⚠ Görsel yüklenmedi (${loadStatus.reason})`);
+        await idataLog("login_captcha", `CAPTCHA görsel yüklenmedi: ${loadStatus.reason} (deneme ${attempt}/${maxAttempts})`);
+
+        // İlk başarısızlıkta resim yenileme butonu tıkla
+        const refreshed = await refreshCaptchaImage(page);
+        if (refreshed) {
+          console.log("  [CAPTCHA] 🔄 Resim yenileme butonu tıklandı");
+          await delay(3000, 5000);
+          // Yenileme sonrası tekrar kontrol et
+          const recheck = await waitForCaptchaImageLoad(page, 6000);
+          if (recheck.loaded) {
+            console.log("  [CAPTCHA] ✅ Yenileme sonrası görsel yüklendi");
+          } else {
+            console.log("  [CAPTCHA] ⚠ Yenileme sonrası da yüklenmedi");
+            // Henüz sayfa yenileme yapmadıysak yap
+            if (!pageReloaded && attempt < maxAttempts) {
+              console.log("  [CAPTCHA] 🔄 Sayfa yenileniyor (page reload)...");
+              await idataLog("login_captcha", "Sayfa yenileniyor: CAPTCHA görseli broken");
+              await page.reload({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+              pageReloaded = true;
+              await delay(3000, 5000);
+              // CF bypass bekle
+              const { waitCloudflareBypass } = require ? {} : {};
+              // Basit CF bekleme
+              await delay(3000, 5000);
+            }
+            continue;
+          }
+        } else {
+          // Yenileme butonu bulunamadı → sayfa reload
+          if (!pageReloaded && attempt < maxAttempts) {
+            console.log("  [CAPTCHA] 🔄 Yenileme butonu yok, sayfa yenileniyor...");
+            await idataLog("login_captcha", "Sayfa yenileniyor: CAPTCHA görseli yüklenemedi, yenileme butonu yok");
+            await page.reload({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+            pageReloaded = true;
+            await delay(4000, 6000);
+          }
+          continue;
+        }
+      }
+
+      // Görsel yüklendi, screenshot al
       const capture = await getCaptchaImageBase64(page);
       const captchaImgBase64 = capture?.base64;
 
       if (!captchaImgBase64) {
-        console.log(`  [CAPTCHA] ⚠ Captcha resmi bulunamadı (deneme ${attempt}/${maxAttempts}): ${capture?.reason || "unknown"}`);
+        console.log(`  [CAPTCHA] ⚠ Captcha base64 alınamadı (deneme ${attempt}/${maxAttempts}): ${capture?.reason || "unknown"}`);
+        await idataLog("login_captcha", `CAPTCHA base64 alınamadı: ${capture?.reason || "unknown"}`);
         await delay(1200, 2000);
         continue;
       }
