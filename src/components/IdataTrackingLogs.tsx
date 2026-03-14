@@ -157,6 +157,12 @@ export default function IdataTrackingLogs() {
     setLoading(false);
   };
 
+  const clearLogs = async () => {
+    if (!confirm("Tüm iDATA loglarını silmek istediğinize emin misiniz?")) return;
+    await supabase.from("idata_tracking_logs" as any).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    setLogs([]);
+  };
+
   useEffect(() => {
     fetchLogs();
     fetchConfig();
