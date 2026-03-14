@@ -1378,6 +1378,44 @@ async function applyFingerprint(page, fp) {
   await page.setUserAgent(fp.userAgent);
   await page.setViewport(fp.viewport);
   await page.evaluateOnNewDocument((fp) => {
+    // ===== ANTI-DETECTION: webdriver flag =====
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    // Chrome runtime mock (headless detection bypass)
+    if (!window.chrome) window.chrome = {};
+    if (!window.chrome.runtime) window.chrome.runtime = { connect: () => {}, sendMessage: () => {}, id: "mhjfbmdgcfjbbpaeojofohoefgiehjai" };
+    // Permissions API override
+    const originalQuery = window.navigator.permissions?.query;
+    if (originalQuery) {
+      window.navigator.permissions.query = (parameters) => {
+        if (parameters.name === "notifications") {
+          return Promise.resolve({ state: Notification.permission });
+        }
+        return originalQuery(parameters);
+      };
+    }
+    // Plugin/MimeType mock (headless has 0 plugins)
+    Object.defineProperty(navigator, "plugins", {
+      get: () => {
+        const plugins = [
+          { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+          { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+          { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+        ];
+        plugins.item = (i) => plugins[i];
+        plugins.namedItem = (n) => plugins.find(p => p.name === n);
+        plugins.refresh = () => {};
+        return plugins;
+      }
+    });
+    Object.defineProperty(navigator, "mimeTypes", {
+      get: () => {
+        const mimes = [{ type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" }];
+        mimes.item = (i) => mimes[i];
+        mimes.namedItem = (n) => mimes.find(m => m.type === n);
+        return mimes;
+      }
+    });
+
     Object.defineProperty(navigator, "platform", { get: () => fp.platform });
     Object.defineProperty(navigator, "languages", { get: () => fp.languages });
     Object.defineProperty(navigator, "language", { get: () => fp.languages[0] });

@@ -585,6 +585,42 @@ async function launchBrowser(ip = null) {
   const { browser, page } = await connect(connectOptions);
   console.log(`  [BROWSER] ✅ Tarayıcı başlatıldı (proxy auth: ${proxyConfig ? 'connect() ile' : 'yok'})`);
 
+  // ===== ANTI-DETECTION STEALTH =====
+  await page.evaluateOnNewDocument(() => {
+    // webdriver flag
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    // Chrome runtime mock
+    if (!window.chrome) window.chrome = {};
+    if (!window.chrome.runtime) window.chrome.runtime = { connect: () => {}, sendMessage: () => {}, id: "mhjfbmdgcfjbbpaeojofohoefgiehjai" };
+    // Permissions API
+    const origQuery = window.navigator.permissions?.query;
+    if (origQuery) {
+      window.navigator.permissions.query = (params) => {
+        if (params.name === "notifications") return Promise.resolve({ state: Notification.permission });
+        return origQuery(params);
+      };
+    }
+    // Plugins mock
+    Object.defineProperty(navigator, "plugins", {
+      get: () => {
+        const p = [
+          { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+          { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+          { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+        ];
+        p.item = (i) => p[i]; p.namedItem = (n) => p.find(x => x.name === n); p.refresh = () => {};
+        return p;
+      }
+    });
+    Object.defineProperty(navigator, "mimeTypes", {
+      get: () => {
+        const m = [{ type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" }];
+        m.item = (i) => m[i]; m.namedItem = (n) => m.find(x => x.type === n);
+        return m;
+      }
+    });
+  });
+
   await page.setUserAgent(ua);
   await page.setViewport(vp);
 
