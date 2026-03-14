@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
 import {
   CheckCircle2, Search, AlertCircle, Clock, Image as ImageIcon, X,
   LogIn, FormInput, ShieldCheck, KeyRound, Globe, Timer, MonitorSmartphone,
-  UserPlus, MousePointer, Wifi, Ban, RefreshCw, Network
+  UserPlus, MousePointer, Wifi, Ban, RefreshCw, Network, Trash2
 } from "lucide-react";
 
 interface LogEntry {
@@ -124,6 +125,13 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
     setLoading(false);
   };
 
+  const clearLogs = async () => {
+    if (!configId) return;
+    if (!confirm("Tüm VFS loglarını silmek istediğinize emin misiniz?")) return;
+    await supabase.from("tracking_logs").delete().eq("config_id", configId);
+    setLogs([]);
+  };
+
   useEffect(() => {
     fetchLogs();
     if (!configId) return;
@@ -206,7 +214,13 @@ export default function TrackingLogs({ configId }: TrackingLogsProps) {
             </div>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">{logs.length} kayıt</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{logs.length} kayıt</span>
+          <Button variant="ghost" size="sm" onClick={clearLogs} className="gap-1.5 text-xs text-muted-foreground hover:text-destructive">
+            <Trash2 className="w-3.5 h-3.5" />
+            Temizle
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between">
