@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Globe, Plus, Trash2, Save, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Settings, Globe, Plus, Trash2, Save, Eye, EyeOff, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 interface VfsCountry {
@@ -38,6 +38,9 @@ export default function BotSettingsPanel() {
   const [showCaptchaKey, setShowCaptchaKey] = useState(false);
   const [currentIp, setCurrentIp] = useState<string | null>(null);
   const [lastIpReset, setLastIpReset] = useState<string | null>(null);
+  const [evomiRegions, setEvomiRegions] = useState<string[]>([]);
+  const [evomiCities, setEvomiCities] = useState<{ name: string; region?: string }[]>([]);
+  const [loadingRegions, setLoadingRegions] = useState(false);
 
   // Local draft state for editable fields
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -93,6 +96,26 @@ export default function BotSettingsPanel() {
 
   const getDraft = (key: string) => draft[key] ?? settings.find(s => s.key === key)?.value ?? "";
 
+  const fetchEvomiRegions = async () => {
+    setLoadingRegions(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("evomi-regions", {
+        body: { country: getDraft("proxy_country") || "TR" },
+      });
+      if (error) throw error;
+      if (data?.ok) {
+        setEvomiRegions(data.regions || []);
+        setEvomiCities(data.cities || []);
+        toast.success(`${(data.regions || []).length} bölge, ${(data.cities || []).length} şehir yüklendi`);
+      } else {
+        toast.error(data?.error || "Bölge listesi alınamadı");
+      }
+    } catch (err: any) {
+      toast.error("Evomi API hatası: " + err.message);
+    }
+    setLoadingRegions(false);
+  };
+
   const setDraftValue = (key: string, value: string) => {
     setDraft(prev => ({ ...prev, [key]: value }));
     setDirty(true);
@@ -111,6 +134,7 @@ export default function BotSettingsPanel() {
       { key: "capsolver_api_key", label: "Capsolver API Key" },
       { key: "captcha_api_key", label: "2Captcha API Key" },
       { key: "ip_rotation_interval", label: "IP Rotasyon Süresi (dk)" },
+      { key: "evomi_api_key", label: "Evomi API Key" },
     ];
 
     for (const { key, label } of keys) {
@@ -331,13 +355,62 @@ export default function BotSettingsPanel() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-[11px] text-muted-foreground">Proxy Bölge (Region)</Label>
-          <Input
-            className="h-8 text-xs font-mono"
-            value={getDraft("proxy_region")}
-            onChange={e => setDraftValue("proxy_region", e.target.value)}
-            placeholder="ankara"
-          />
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px] text-muted-foreground">Proxy Bölge (Region)</Label>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 text-[10px] gap-1 px-1.5"
+              onClick={fetchEvomiRegions}
+              disabled={loadingRegions}
+            >
+              {loadingRegions ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+              API'den Çek
+            </Button>
+          </div>
+          {evomiRegions.length > 0 ? (
+            <Select
+              value={getDraft("proxy_region") || ""}
+              onValueChange={v => setDraftValue("proxy_region", v)}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Bölge seçin..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="">Yok (rastgele)</SelectItem>
+                {evomiRegions.map(r => (
+                  <SelectItem key={r} value={r}>{r}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              className="h-8 text-xs font-mono"
+              value={getDraft("proxy_region")}
+              onChange={e => setDraftValue("proxy_region", e.target.value)}
+              placeholder="ankara (API'den çekmek için butona tıklayın)"
+            />
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-[11px] text-muted-foreground">Evomi API Key</Label>
+          <div className="relative">
+            <Input
+              className="h-8 text-xs font-mono pr-8"
+              type={showPass ? "text" : "password"}
+              value={getDraft("evomi_api_key")}
+              onChange={e => setDraftValue("evomi_api_key", e.target.value)}
+              placeholder="Evomi dashboard'dan alın"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPass(!showPass)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
       </div>
 
