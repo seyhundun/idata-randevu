@@ -57,6 +57,25 @@ export default function ControlPanel({
 }: ControlPanelProps) {
   const isActive = status === "searching";
 
+  const [dynCountries, setDynCountries] = useState<DynCountry[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("vfs_countries")
+        .select("value, label, flag, code")
+        .eq("is_active", true)
+        .order("sort_order");
+      if (data) setDynCountries(data);
+    };
+    load();
+    const ch = supabase
+      .channel("countries-ctrl")
+      .on("postgres_changes", { event: "*", schema: "public", table: "vfs_countries" }, () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, []);
+
   return (
     <Card className="p-4 space-y-4">
       <div>
