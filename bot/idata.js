@@ -66,7 +66,7 @@ async function loadProxySettingsFromDB() {
       if (map.captcha_provider) CAPTCHA_PROVIDER = map.captcha_provider.toLowerCase();
       if (map.capsolver_api_key) CAPSOLVER_API_KEY = map.capsolver_api_key;
       if (map.captcha_api_key) CONFIG.CAPTCHA_API_KEY = map.captcha_api_key;
-      console.log(`  [DB] ✅ Ayarlar DB'den: proxy=${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} ülke=${EVOMI_PROXY_COUNTRY} bölge=${EVOMI_PROXY_REGION || 'yok'} captcha=${CAPTCHA_PROVIDER}`);
+      console.log(`  [DB] ✅ Ayarlar DB'den: proxy_enabled=${PROXY_ENABLED} proxy=${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} ülke=${EVOMI_PROXY_COUNTRY} bölge=${EVOMI_PROXY_REGION || 'yok'} captcha=${CAPTCHA_PROVIDER}`);
     }
   } catch (e) {
     console.warn(`  [DB] ⚠️ DB proxy ayarı okunamadı: ${e.message}`);
