@@ -443,27 +443,58 @@ export default function BotSettingsPanel() {
         </div>
       </div>
 
-      {/* Proxy Country */}
       <div className="space-y-2 border-t border-border pt-4">
-        <Label className="text-xs font-medium flex items-center gap-1.5">
-          <Globe className="w-3 h-3 text-muted-foreground" />
-          Proxy Ülkesi (Evomi IP Lokasyonu)
-        </Label>
-        <div className="flex flex-wrap gap-1.5">
-          {proxyCountries.map(pc => (
-            <button
-              key={pc.code}
-              onClick={() => updateProxyCountry(pc.code)}
-              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
-                getDraft("proxy_country") === pc.code
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-secondary text-foreground hover:bg-secondary/80"
-              }`}
-            >
-              {pc.label}
-            </button>
-          ))}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium flex items-center gap-1.5">
+            <Globe className="w-3 h-3 text-muted-foreground" />
+            Proxy Ülkesi (Evomi IP Lokasyonu)
+          </Label>
+          {evomiCountries.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">{evomiCountries.length} ülke (API)</span>
+          )}
         </div>
+        {evomiCountries.length > 0 ? (
+          <Popover open={countryPopoverOpen} onOpenChange={setCountryPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" className="h-8 text-xs justify-between w-full font-mono">
+                {getDraft("proxy_country") ? `${getDraft("proxy_country")} — ${evomiCountries.find(c => c.code === getDraft("proxy_country"))?.name || getDraft("proxy_country")}` : "Ülke seçin..."}
+                <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Ülke ara..." className="h-8 text-xs" />
+                <CommandList>
+                  <CommandEmpty>Sonuç bulunamadı</CommandEmpty>
+                  <CommandGroup>
+                    {activeProxyCountries.map(pc => (
+                      <CommandItem key={pc.code} value={`${pc.code} ${pc.name}`} onSelect={() => { updateProxyCountry(pc.code); setCountryPopoverOpen(false); }}>
+                        <Check className={`mr-2 h-3 w-3 ${getDraft("proxy_country") === pc.code ? "opacity-100" : "opacity-0"}`} />
+                        {pc.code} — {pc.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {defaultProxyCountries.map(pc => (
+              <button
+                key={pc.code}
+                onClick={() => updateProxyCountry(pc.code)}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  getDraft("proxy_country") === pc.code
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-secondary text-foreground hover:bg-secondary/80"
+                }`}
+              >
+                {pc.code} — {pc.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Save Button */}
