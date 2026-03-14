@@ -53,8 +53,9 @@ export default function ProxySettings({ configId }: ProxySettingsProps) {
       .limit(20);
     if (logs) {
       for (const log of logs) {
-        const match = log.message?.match(/IP:\s*(\d+\.\d+\.\d+\.\d+)/);
-        if (match) {
+        // IPv4 veya IPv6 adreslerini yakala
+        const match = log.message?.match(/(?:Aktif\s+)?IP:\s*([0-9a-fA-F.:]+)/);
+        if (match && match[1] && match[1] !== "doğrudan" && match[1] !== "sıradaki") {
           setCurrentIp(match[1]);
           setLastReset(log.created_at);
           break;
