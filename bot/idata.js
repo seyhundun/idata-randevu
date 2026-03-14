@@ -1174,6 +1174,76 @@ async function waitForLoginOtp(accountId, timeoutMs = 180000) {
   }
   return null;
 }
+
+// ==================== AUTH SUBMIT HELPER ====================
+async function clickAuthSubmitButton(page, phase = "login") {
+  const result = await page.evaluate(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const st = window.getComputedStyle(el);
+      return rect.width > 20 && rect.height > 20 && st.visibility !== "hidden" && st.display !== "none";
+    };
+
+    const textOf = (el) => ((el.textContent || el.value || el.getAttribute("value") || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFC"));
+
+    const all = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a, [role='button']"))
+      .filter(isVisible);
+
+    const scored = all.map((el) => {
+      const txt = textOf(el);
+      let score = 0;
+      if (/^(giriş|giris|login|sign in|oturum aç)$/.test(txt)) score += 120;
+      else if (/(giriş|giris|login|sign in|oturum)/.test(txt)) score += 90;
+      if (/(doğrula|dogrula|onayla|verify|gönder|submit|devam)/.test(txt)) score += 70;
+      if ((el.type || "").toLowerCase() === "submit") score += 25;
+      if (el.hasAttribute("disabled")) score -= 50;
+      return { el, txt, score };
+    }).sort((a, b) => b.score - a.score);
+
+    let target = scored[0]?.el || document.querySelector('button[type="submit"], input[type="submit"]');
+
+    if (target) {
+      target.removeAttribute?.("disabled");
+      target.removeAttribute?.("aria-disabled");
+      target.classList?.remove("disabled");
+
+      const fire = (type) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      fire("mouseover");
+      fire("mousedown");
+      fire("mouseup");
+      target.click();
+
+      const form = target.closest?.("form") || document.querySelector("form");
+      if (form) {
+        if (typeof form.requestSubmit === "function") form.requestSubmit();
+      }
+
+      return {
+        found: true,
+        tag: target.tagName,
+        text: textOf(target).slice(0, 40),
+        score: scored[0]?.score ?? null,
+      };
+    }
+
+    const form = document.querySelector("form");
+    if (form) {
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
+      else form.submit();
+      return { found: true, tag: "FORM", text: "form.submit", score: null };
+    }
+
+    return { found: false };
+  });
+
+  console.log(`  [LOGIN] Submit (${phase}):`, result);
+  await idataLog("login_form", `Submit (${phase}): ${result?.found ? `${result.tag} \"${result.text}\"` : "BULUNAMADI"}`);
+  return result;
+}
+
 async function registerAccount(page, account) {
   console.log(`\n📝 [iDATA] Kayıt başlıyor: ${account.email}`);
 
@@ -1577,30 +1647,12 @@ async function loginToIdata(page, account) {
     }
     await delay(900, 1400);
 
-    // Giriş butonu — geniş seçici (button, input, a, span dahil)
-    const loginClicked = await page.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a, [role='button']"));
-      const loginBtn = candidates.find(b => {
-        const txt = (b.textContent || b.value || b.getAttribute("value") || "").trim().toLowerCase().normalize("NFC");
-        return /^giri[sş]$/i.test(txt) || txt === "login" || txt === "oturum aç" || txt === "sign in";
-      });
-      // Fallback: submit button veya form submit
-      const fallback = document.querySelector('button[type="submit"], input[type="submit"]');
-      const target = loginBtn || fallback;
-      if (target) {
-        target.click();
-        return { found: true, tag: target.tagName, text: (target.textContent || target.value || "").trim().slice(0, 30) };
-      }
-      // Son fallback: formu direkt submit et
-      const form = document.querySelector("form");
-      if (form) { form.submit(); return { found: true, tag: "FORM", text: "form.submit()" }; }
-      return { found: false };
-    });
-    console.log(`  [LOGIN] Giriş butonu:`, loginClicked);
-    await idataLog("login_form", `Giriş butonu: ${loginClicked?.found ? `${loginClicked.tag} "${loginClicked.text}"` : "BULUNAMADI!"}`);
+    // Giriş butonuna tıkla
+    const loginClicked = await clickAuthSubmitButton(page, "ilk_giris");
     if (!loginClicked?.found) {
       const ss = await takeScreenshotBase64(page);
       await idataLog("login_fail", `Giriş butonu bulunamadı!`, ss);
+      return { success: false, reason: "submit_not_found", screenshot: ss };
     }
 
     await delay(3000, 5000);
@@ -1674,16 +1726,8 @@ async function loginToIdata(page, account) {
         if (retryTyped) {
           await delay(800, 1200);
           // Tekrar Giriş'e tıkla
-          await page.evaluate(() => {
-            const candidates = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a, [role='button']"));
-            const loginBtn = candidates.find(b => {
-              const txt = (b.textContent || b.value || "").trim().toLowerCase().normalize("NFC");
-              return /^giri[sş]$/i.test(txt) || txt === "login";
-            }) || document.querySelector('button[type="submit"], input[type="submit"]');
-            if (loginBtn) loginBtn.click();
-            else { const f = document.querySelector("form"); if (f) f.submit(); }
-          });
-          await idataLog("login_captcha", `CAPTCHA tekrar çözüldü: ${retryCaptchaCode} — Giriş tıklandı`);
+          const retrySubmit = await clickAuthSubmitButton(page, "captcha_retry_giris");
+          await idataLog("login_captcha", `CAPTCHA tekrar çözüldü: ${retryCaptchaCode} — submit=${retrySubmit?.found ? "ok" : "fail"}`);
           await delay(3000, 5000);
         }
       } else {
@@ -1829,14 +1873,12 @@ async function loginToIdata(page, account) {
       await delay(1000, 2000);
 
       // Doğrula/Giriş butonuna tıkla
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
-        const verifyBtn = btns.find(b => {
-          const txt = (b.textContent || b.value || "").toLowerCase();
-          return txt.includes("doğrula") || txt.includes("onayla") || txt.includes("giriş") || txt.includes("verify") || txt.includes("gönder");
-        }) || document.querySelector('button[type="submit"]');
-        if (verifyBtn) verifyBtn.click();
-      });
+      const otpSubmit = await clickAuthSubmitButton(page, "otp_submit");
+      if (!otpSubmit?.found) {
+        const ss = await takeScreenshotBase64(page);
+        await idataLog("login_fail", `OTP sonrası submit bulunamadı`, ss);
+        return { success: false, reason: "otp_submit_not_found", screenshot: ss };
+      }
       await delay(5000, 8000);
 
       // OTP'yi temizle
@@ -1878,11 +1920,12 @@ async function loginToIdata(page, account) {
           if (target) { target.focus(); target.value = code; target.dispatchEvent(new Event("input",{bubbles:true})); target.dispatchEvent(new Event("change",{bubbles:true})); }
         }, otpCode2);
         await delay(1000, 2000);
-        await page.evaluate(() => {
-          const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
-          const b = btns.find(b => /(doğrula|onayla|giriş|verify|gönder)/i.test(b.textContent||b.value||'')) || document.querySelector('button[type="submit"]');
-          if (b) b.click();
-        });
+        const otpSubmit2 = await clickAuthSubmitButton(page, "otp_submit_gec");
+        if (!otpSubmit2?.found) {
+          const ss = await takeScreenshotBase64(page);
+          await idataLog("login_fail", `OTP(geç) sonrası submit bulunamadı`, ss);
+          return { success: false, reason: "otp_submit_not_found", screenshot: ss };
+        }
         await delay(5000, 8000);
         await apiPost({ action: "idata_clear_login_otp", account_id: account.id }, "clear_login_otp");
         
@@ -1904,8 +1947,26 @@ async function loginToIdata(page, account) {
       return { success: true };
     }
 
+    // Hâlâ login sayfasındaysa submit bir kez daha zorla (bazı akışlarda ilk tıklama düşüyor)
+    if (stillLogin) {
+      await idataLog("login_form", "Hâlâ login ekranında — submit retry tetiklendi");
+      const retrySubmit = await clickAuthSubmitButton(page, "son_retry");
+      if (retrySubmit?.found) {
+        await delay(4000, 7000);
+        const retryState = await readPageState(page);
+        const retryStillLogin = retryState.url.includes("/membership/login") || retryState.body.includes("giriş yap");
+        const retryLoggedIn = !retryState.isCloudflare && !retryStillLogin &&
+          ((retryState.url.includes("/membership") && !retryState.url.includes("/membership/login")) || retryState.body.includes("çıkış") || retryState.body.includes("logout"));
+        if (retryLoggedIn) {
+          console.log("  [LOGIN] ✅ Giriş başarılı (submit retry)!");
+          return { success: true };
+        }
+      }
+    }
+
     console.log("  [LOGIN] ❌ Giriş başarısız");
     const ss = await takeScreenshotBase64(page);
+    await delay(9000, 12000); // hemen kapanmasın, ekranda kontrol için kısa bekleme
     return { success: false, reason: "login_failed", screenshot: ss };
 
   } catch (err) {
@@ -2371,9 +2432,9 @@ async function mainLoop() {
                 continue; // CF engeli — sonraki IP
               }
 
-              if (["captcha_failed", "captcha_invalid"].includes(loginResult.reason)) {
+              if (["captcha_failed", "captcha_invalid", "login_failed", "otp_failed", "otp_submit_not_found", "submit_not_found"].includes(loginResult.reason)) {
                 allCfBlocked = false;
-                console.log(`  [LOGIN] 🔁 CAPTCHA sebebiyle yeniden denenecek (${attempt}/3)`);
+                console.log(`  [LOGIN] 🔁 ${loginResult.reason} sebebiyle yeniden denenecek (${attempt}/3)`);
                 if (attempt < 3) continue;
               }
 
