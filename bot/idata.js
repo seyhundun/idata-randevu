@@ -581,7 +581,9 @@ async function launchBrowser(ip = null) {
 
   let proxyConfig = undefined;
 
-  if (PROXY_MODE === "residential" && EVOMI_PROXY_USER) {
+  if (!PROXY_ENABLED) {
+    console.log(`  [BROWSER] 🔵 Proxy KAPALI — sunucu kendi IP'si ile çıkıyor`);
+  } else if (PROXY_MODE === "residential" && EVOMI_PROXY_USER) {
     const rp = getResidentialProxyUrl();
     proxyConfig = {
       host: `http://${rp.host}`,
