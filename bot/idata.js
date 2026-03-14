@@ -1185,30 +1185,40 @@ async function tryImapOtp(accountId) {
 async function waitForLoginOtp(accountId, timeoutMs = 180000, hasImap = false) {
   const start = Date.now();
   let imapAttempts = 0;
+  let imapPromise = null; // background IMAP fetch
   
   while (Date.now() - start < timeoutMs) {
-    // 1) IMAP varsa önce otomatik dene (her 10 saniyede)
-    if (hasImap && imapAttempts < 20) {
+    // 1) IMAP: arka planda çalıştır, sonucu beklemeden manual'ı da kontrol et
+    if (hasImap && imapAttempts < 20 && !imapPromise) {
       imapAttempts++;
       console.log(`  [OTP] IMAP ile otomatik okuma deneniyor (${imapAttempts})...`);
-      const imapOtp = await tryImapOtp(accountId);
-      if (imapOtp) {
-        console.log(`  [OTP] ✅ IMAP'ten OTP alındı: ${imapOtp}`);
-        await idataLog("login_otp", `📧 IMAP'ten OTP alındı otomatik: ${imapOtp}`);
-        return imapOtp;
+      imapPromise = tryImapOtp(accountId).then(otp => {
+        imapPromise = null;
+        return otp;
+      }).catch(() => { imapPromise = null; return null; });
+    }
+    
+    // Check if IMAP resolved
+    if (imapPromise) {
+      const raceResult = await Promise.race([imapPromise, new Promise(r => setTimeout(() => r("__timeout__"), 500))]);
+      if (raceResult && raceResult !== "__timeout__") {
+        console.log(`  [OTP] ✅ IMAP'ten OTP alındı: ${raceResult}`);
+        await idataLog("login_otp", `📧 IMAP'ten OTP alındı otomatik: ${raceResult}`);
+        return raceResult;
       }
     }
 
-    // 2) Manuel OTP kontrolü (dashboard'dan)
+    // 2) Manuel OTP kontrolü (dashboard'dan) — her zaman kontrol et
     try {
       const data = await apiPost({ action: "idata_get_login_otp", account_id: accountId }, "get_login_otp");
       if (data?.manual_otp) {
+        console.log(`  [OTP] ✅ Manuel OTP alındı: ${data.manual_otp}`);
         return data.manual_otp;
       }
     } catch (err) {
       console.log(`  [OTP] Poll hatası: ${err.message}`);
     }
-    await delay(CONFIG.OTP_POLL_MS, CONFIG.OTP_POLL_MS + 1000);
+    await delay(3000, 4000);
   }
   return null;
 }
