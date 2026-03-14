@@ -48,6 +48,17 @@ const statusConfig: Record<string, { icon: React.ReactNode; label: string; color
   no_slots:       { icon: <Ban className="w-4 h-4" />, label: "Slot Yok", color: "text-muted-foreground bg-muted/50" },
   found:          { icon: <CheckCircle2 className="w-4 h-4" />, label: "🎉 BULUNDU!", color: "text-green-600 bg-green-500/15 font-bold" },
 
+  // --- Appointment booking flow ---
+  appt_navigate:  { icon: <Globe className="w-4 h-4" />, label: "Randevu Sayfası", color: "text-blue-400 bg-blue-400/10" },
+  appt_category:  { icon: <FormInput className="w-4 h-4" />, label: "Kategori Seçimi", color: "text-blue-500 bg-blue-500/10" },
+  appt_centre:    { icon: <MapPin className="w-4 h-4" />, label: "Merkez Seçimi", color: "text-blue-500 bg-blue-500/10" },
+  appt_calendar:  { icon: <Clock className="w-4 h-4" />, label: "Takvim Kontrol", color: "text-primary bg-primary/10" },
+  appt_date:      { icon: <CheckCircle2 className="w-4 h-4" />, label: "Tarih Seçildi", color: "text-green-500 bg-green-500/10" },
+  appt_time:      { icon: <Clock className="w-4 h-4" />, label: "Saat Seçildi", color: "text-green-500 bg-green-500/10" },
+  appt_fill:      { icon: <FormInput className="w-4 h-4" />, label: "Bilgi Dolduruluyor", color: "text-blue-500 bg-blue-500/10" },
+  appt_confirm:   { icon: <CheckCircle2 className="w-4 h-4" />, label: "✅ Randevu Alındı!", color: "text-green-600 bg-green-500/15 font-bold" },
+  appt_fail:      { icon: <AlertCircle className="w-4 h-4" />, label: "Randevu Alınamadı", color: "text-destructive bg-destructive/10" },
+
   // --- Registration flow ---
   reg_start:      { icon: <UserPlus className="w-4 h-4" />, label: "Kayıt Başladı", color: "text-violet-500 bg-violet-500/10" },
   reg_form:       { icon: <FormInput className="w-4 h-4" />, label: "Kayıt Formu", color: "text-violet-500 bg-violet-500/10" },

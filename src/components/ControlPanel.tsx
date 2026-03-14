@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CITIES, VISA_CATEGORIES } from "@/lib/constants";
+import { CITIES, VISA_CATEGORIES, VISA_SUBCATEGORIES } from "@/lib/constants";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Select,
