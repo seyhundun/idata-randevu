@@ -134,6 +134,7 @@ export default function BotSettingsPanel() {
   const saveAllSettings = async () => {
     setSavingSettings(true);
     const keys = [
+      { key: "proxy_enabled", label: "Proxy Aktif" },
       { key: "proxy_host", label: "Proxy Host" },
       { key: "proxy_port", label: "Proxy Port" },
       { key: "proxy_user", label: "Proxy Kullanıcı" },
