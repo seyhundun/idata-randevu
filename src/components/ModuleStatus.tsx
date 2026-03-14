@@ -152,7 +152,7 @@ export default function ModuleStatus({ status, configId, onStart, onStop, canSta
             className="w-full gap-1.5"
             disabled={!canStart}
           >
-            {status === "searching" ? (
+            {false ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Play className="w-3.5 h-3.5" />
