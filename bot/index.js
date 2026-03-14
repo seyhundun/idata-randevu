@@ -505,8 +505,22 @@ async function isWaitingRoomPage(page) {
   return await page.evaluate(() => {
     const title = (document.title || "").toLowerCase();
     const body = (document.body?.innerText || "").toLowerCase();
-    return title.includes("waiting room") || body.includes("şu anda sıradasınız") ||
-      body.includes("tahmini bekleme süreniz") || body.includes("this page will auto refresh") ||
+    const url = (window.location.href || "").toLowerCase();
+
+    const isNotFoundLike =
+      url.includes("page-not-found") ||
+      url.includes("/404") ||
+      title.includes("bir şeyler ters gitti") ||
+      title.includes("üzgünüm") ||
+      body.includes("bir şeyler ters gitti") ||
+      body.includes("sorry, something went wrong");
+
+    if (isNotFoundLike) return false;
+
+    return title.includes("waiting room") ||
+      body.includes("şu anda sıradasınız") ||
+      body.includes("tahmini bekleme süreniz") ||
+      body.includes("this page will auto refresh") ||
       body.includes("bu sayfa otomatik olarak yenilenecektir");
   });
 }
@@ -608,18 +622,6 @@ async function waitForRegistrationFormAfterQueue(page, registerUrl) {
     }
 
     const waitedSec = Math.round((Date.now() - startedAt) / 1000);
-    const waitingRoom = await isWaitingRoomPage(page);
-    if (waitingRoom) {
-      console.log(`  [REG] Sırada bekleniyor... ${waitedSec}s`);
-      if (Date.now() - lastScreenshotAt > 30000) {
-        await postQueueScreenshot(page, "REG-QUEUE", waitedSec, "Sırada bekleniyor");
-        lastScreenshotAt = Date.now();
-      }
-      await solveTurnstile(page);
-      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: CONFIG.QUEUE_POLL_MS + 5000 }).catch(() => {});
-      await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 3000);
-      continue;
-    }
 
     const notFoundLike =
       formState.url.includes("page-not-found") ||
@@ -647,6 +649,19 @@ async function waitForRegistrationFormAfterQueue(page, registerUrl) {
         await solveTurnstile(page);
         continue;
       }
+    }
+
+    const waitingRoom = await isWaitingRoomPage(page);
+    if (waitingRoom) {
+      console.log(`  [REG] Sırada bekleniyor... ${waitedSec}s`);
+      if (Date.now() - lastScreenshotAt > 30000) {
+        await postQueueScreenshot(page, "REG-QUEUE", waitedSec, "Sırada bekleniyor");
+        lastScreenshotAt = Date.now();
+      }
+      await solveTurnstile(page);
+      await page.waitForNavigation({ waitUntil: "networkidle2", timeout: CONFIG.QUEUE_POLL_MS + 5000 }).catch(() => {});
+      await delay(CONFIG.QUEUE_POLL_MS, CONFIG.QUEUE_POLL_MS + 3000);
+      continue;
     }
 
     if (attempt % 3 === 0) {
