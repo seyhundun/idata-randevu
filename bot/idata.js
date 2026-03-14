@@ -2156,6 +2156,32 @@ async function checkAppointments(page, account) {
           if (addBtn) addBtn.click();
         });
         await delay(3000, 5000);
+
+        // Uyarı popup'ı varsa kapat ("Tamam" butonuna tıkla)
+        for (let popupTry = 0; popupTry < 3; popupTry++) {
+          const dismissed = await page.evaluate(() => {
+            // Modal/popup içindeki "Tamam", "OK", "Kapat" butonlarını ara
+            const allBtns = Array.from(document.querySelectorAll("button, a, input[type='button']"));
+            for (const btn of allBtns) {
+              const txt = (btn.textContent || btn.value || "").trim().toLowerCase();
+              if (txt === "tamam" || txt === "ok" || txt === "kapat") {
+                // Görünür mü kontrol et
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  btn.click();
+                  return true;
+                }
+              }
+            }
+            return false;
+          });
+          if (dismissed) {
+            console.log("  [CHECK] ⚠ Uyarı popup'ı kapatıldı (Tamam)");
+            await delay(1500, 2500);
+          } else {
+            break;
+          }
+        }
       } else {
         console.log("  [CHECK] ⚠ Üyelik numarası input'u bulunamadı");
       }
