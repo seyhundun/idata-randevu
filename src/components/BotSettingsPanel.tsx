@@ -44,6 +44,7 @@ export default function BotSettingsPanel() {
   const [evomiRegions, setEvomiRegions] = useState<string[]>([]);
   const [evomiCities, setEvomiCities] = useState<{ name: string; region?: string }[]>([]);
   const [loadingRegions, setLoadingRegions] = useState(false);
+  const [regionPopoverOpen, setRegionPopoverOpen] = useState(false);
 
   // Local draft state for editable fields
   const [draft, setDraft] = useState<Record<string, string>>({});
