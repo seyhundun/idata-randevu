@@ -41,6 +41,7 @@ export default function ProxySettings({ configId }: ProxySettingsProps) {
       const map = Object.fromEntries(data.map(d => [d.key, d.value]));
       setProxyHost(map.proxy_host || "—");
       setProxyCountry(map.proxy_country || "—");
+      setProxyEnabled(map.proxy_enabled !== "false");
     }
   };
 
