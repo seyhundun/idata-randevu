@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LogOut, Clock, PanelLeftClose, PanelLeft, Network, Globe, Settings, BookOpen } from "lucide-react";
+import { LogOut, Clock, PanelLeftClose, PanelLeft, Network, Globe, Settings, BookOpen, Monitor } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import ControlPanel from "@/components/ControlPanel";
@@ -17,6 +17,7 @@ import IdataControlPanel from "@/components/IdataControlPanel";
 import IdataAccounts from "@/components/IdataAccounts";
 import IdataTrackingLogs from "@/components/IdataTrackingLogs";
 import BotSettingsPanel from "@/components/BotSettingsPanel";
+import VncViewer from "@/components/VncViewer";
 import { useTracking } from "@/hooks/useTracking";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -128,6 +129,10 @@ const Index = () => {
                       />
                     </SidebarSection>
 
+                    <SidebarSection icon={<Monitor className="w-3.5 h-3.5" />} title="Canlı Ekran (VNC)" defaultOpen={false}>
+                      <VncViewer title="VFS Bot Ekranı" defaultPort={6080} />
+                    </SidebarSection>
+
                     <SidebarSection icon={<Settings className="w-3.5 h-3.5" />} title="Bot & Ülke Ayarları">
                       <BotSettingsPanel />
                     </SidebarSection>
@@ -192,6 +197,9 @@ const Index = () => {
                   <div className="p-3 space-y-1">
                     <SidebarSection icon={<Settings className="w-3.5 h-3.5" />} title="iDATA Kontrol Paneli" defaultOpen>
                       <IdataControlPanel />
+                    </SidebarSection>
+                    <SidebarSection icon={<Monitor className="w-3.5 h-3.5" />} title="Canlı Ekran (VNC)" defaultOpen={false}>
+                      <VncViewer title="iDATA Bot Ekranı" defaultPort={6081} />
                     </SidebarSection>
                     <SidebarSection icon={<Globe className="w-3.5 h-3.5" />} title="Bot & Ülke Ayarları">
                       <BotSettingsPanel />
