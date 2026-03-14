@@ -581,6 +581,8 @@ async function launchBrowser(ip = null) {
     "--use-gl=swiftshader",
     "--enable-unsafe-swiftshader",
     "--enable-webgl",
+    "--start-maximized",
+    "--window-size=1920,1080",
   ];
 
   let proxyConfig = undefined;
