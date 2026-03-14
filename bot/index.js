@@ -65,6 +65,8 @@ const IP_MAX_FAILS = 3;
 const IP_BAN_DURATION_MS = Number(process.env.IP_BAN_DURATION_MS || 1800000);
 let ipBannedUntil = new Map();
 let residentialSessionId = 0;
+let IP_ROTATION_INTERVAL_MS = Number(process.env.IP_ROTATION_INTERVAL_MS || 0); // 0 = devre dışı
+let lastIpRotationTime = Date.now();
 
 // ==================== PROXY REGION ROTATION ====================
 const PROXY_REGIONS = ["ankara", "adana", "konya", "istanbul", "izmir", "bursa", "antalya"];
