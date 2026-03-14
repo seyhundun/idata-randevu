@@ -279,6 +279,8 @@ export function useTracking() {
     setCity,
     visaCategory,
     setVisaCategory,
+    visaSubcategory,
+    setVisaSubcategory,
     personCount,
     setPersonCount,
     interval,

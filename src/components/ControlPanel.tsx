@@ -136,7 +136,7 @@ export default function ControlPanel({
       {/* Visa Category */}
       <div className="flex flex-col gap-1.5">
         <Label className="text-xs font-medium">Vize Kategorisi</Label>
-        <Select value={visaCategory} onValueChange={setVisaCategory} disabled={isActive}>
+        <Select value={visaCategory} onValueChange={(v) => { setVisaCategory(v); setVisaSubcategory(""); }} disabled={isActive}>
           <SelectTrigger className="h-8 text-xs">
             <SelectValue placeholder="Kategori seçin" />
           </SelectTrigger>
@@ -149,6 +149,25 @@ export default function ControlPanel({
           </SelectContent>
         </Select>
       </div>
+
+      {/* Visa Subcategory */}
+      {visaCategory && VISA_SUBCATEGORIES[visaCategory] && (
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs font-medium">Alt Kategori</Label>
+          <Select value={visaSubcategory} onValueChange={setVisaSubcategory} disabled={isActive}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue placeholder="Alt kategori seçin" />
+            </SelectTrigger>
+            <SelectContent>
+              {VISA_SUBCATEGORIES[visaCategory].map((sub) => (
+                <SelectItem key={sub} value={sub}>
+                  {sub}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Person Count */}
       <div className="flex flex-col gap-1.5">
