@@ -47,6 +47,8 @@ export default function BotSettingsPanel() {
   const [loadingRegions, setLoadingRegions] = useState(false);
   const [regionPopoverOpen, setRegionPopoverOpen] = useState(false);
   const [countryPopoverOpen, setCountryPopoverOpen] = useState(false);
+  const [idataRegionPopoverOpen, setIdataRegionPopoverOpen] = useState(false);
+  const [idataCountryPopoverOpen, setIdataCountryPopoverOpen] = useState(false);
 
   // Local draft state for editable fields
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -139,8 +141,10 @@ export default function BotSettingsPanel() {
       { key: "proxy_port", label: "Proxy Port" },
       { key: "proxy_user", label: "Proxy Kullanıcı" },
       { key: "proxy_pass", label: "Proxy Şifre" },
-      { key: "proxy_region", label: "Proxy Bölge" },
-      { key: "proxy_country", label: "Proxy Ülke" },
+      { key: "proxy_region", label: "VFS Proxy Bölge" },
+      { key: "proxy_country", label: "VFS Proxy Ülke" },
+      { key: "idata_proxy_country", label: "iDATA Proxy Ülke" },
+      { key: "idata_proxy_region", label: "iDATA Proxy Bölge" },
       { key: "captcha_provider", label: "Captcha Provider" },
       { key: "capsolver_api_key", label: "Capsolver API Key" },
       { key: "captcha_api_key", label: "2Captcha API Key" },
@@ -386,9 +390,10 @@ export default function BotSettingsPanel() {
           </div>
         </div>
 
+        {/* VFS Proxy Region */}
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <Label className="text-[11px] text-muted-foreground">Proxy Bölge (Region)</Label>
+            <Label className="text-[11px] text-muted-foreground">VFS Proxy Bölge (Region)</Label>
             <Button
               variant="ghost"
               size="sm"
@@ -460,11 +465,12 @@ export default function BotSettingsPanel() {
         </div>
       </div>
 
+      {/* VFS Proxy Country */}
       <div className="space-y-2 border-t border-border pt-4">
         <div className="flex items-center justify-between">
           <Label className="text-xs font-medium flex items-center gap-1.5">
-            <Globe className="w-3 h-3 text-muted-foreground" />
-            Proxy Ülkesi (Evomi IP Lokasyonu)
+            <Globe className="w-3 h-3 text-blue-400" />
+            VFS Proxy Ülkesi
           </Label>
           {evomiCountries.length > 0 && (
             <span className="text-[10px] text-muted-foreground">{evomiCountries.length} ülke (API)</span>
@@ -512,6 +518,102 @@ export default function BotSettingsPanel() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* iDATA Proxy Country */}
+      <div className="space-y-2 border-t border-border pt-4">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium flex items-center gap-1.5">
+            <Globe className="w-3 h-3 text-green-400" />
+            iDATA Proxy Ülkesi
+          </Label>
+          {evomiCountries.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">{evomiCountries.length} ülke (API)</span>
+          )}
+        </div>
+        {evomiCountries.length > 0 ? (
+          <Popover open={idataCountryPopoverOpen} onOpenChange={setIdataCountryPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" className="h-8 text-xs justify-between w-full font-mono">
+                {getDraft("idata_proxy_country") ? `${getDraft("idata_proxy_country")} — ${evomiCountries.find(c => c.code === getDraft("idata_proxy_country"))?.name || getDraft("idata_proxy_country")}` : "Ülke seçin..."}
+                <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Ülke ara..." className="h-8 text-xs" />
+                <CommandList>
+                  <CommandEmpty>Sonuç bulunamadı</CommandEmpty>
+                  <CommandGroup>
+                    {activeProxyCountries.map(pc => (
+                      <CommandItem key={pc.code} value={`${pc.code} ${pc.name}`} onSelect={() => { setDraftValue("idata_proxy_country", pc.code); setDraftValue("idata_proxy_region", ""); setIdataCountryPopoverOpen(false); }}>
+                        <Check className={`mr-2 h-3 w-3 ${getDraft("idata_proxy_country") === pc.code ? "opacity-100" : "opacity-0"}`} />
+                        {pc.code} — {pc.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {defaultProxyCountries.map(pc => (
+              <button
+                key={pc.code}
+                onClick={() => { setDraftValue("idata_proxy_country", pc.code); setDraftValue("idata_proxy_region", ""); }}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  getDraft("idata_proxy_country") === pc.code
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-secondary text-foreground hover:bg-secondary/80"
+                }`}
+              >
+                {pc.code} — {pc.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* iDATA Region */}
+        <div className="space-y-1 mt-2">
+          <Label className="text-[11px] text-muted-foreground">iDATA Proxy Bölge (Region)</Label>
+          {evomiRegions.length > 0 ? (
+            <Popover open={idataRegionPopoverOpen} onOpenChange={setIdataRegionPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" className="h-8 text-xs justify-between w-full font-mono">
+                  {getDraft("idata_proxy_region") || "Yok (rastgele)"}
+                  <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Bölge ara..." className="h-8 text-xs" />
+                  <CommandList>
+                    <CommandEmpty>Sonuç bulunamadı</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem value="__none__idata" onSelect={() => { setDraftValue("idata_proxy_region", ""); setIdataRegionPopoverOpen(false); }}>
+                        <Check className={`mr-2 h-3 w-3 ${!getDraft("idata_proxy_region") ? "opacity-100" : "opacity-0"}`} />
+                        Yok (rastgele)
+                      </CommandItem>
+                      {evomiRegions.map((r) => (
+                          <CommandItem key={`idata-${r.id}`} value={`idata-${r.id} ${r.name}`} onSelect={() => { setDraftValue("idata_proxy_region", r.id); setIdataRegionPopoverOpen(false); }}>
+                            <Check className={`mr-2 h-3 w-3 ${getDraft("idata_proxy_region") === r.id ? "opacity-100" : "opacity-0"}`} />
+                            {r.name}
+                          </CommandItem>
+                        ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <Input
+              className="h-8 text-xs font-mono"
+              value={getDraft("idata_proxy_region")}
+              onChange={e => setDraftValue("idata_proxy_region", e.target.value)}
+              placeholder="ankara (API'den çekmek için butona tıklayın)"
+            />
+          )}
+        </div>
       </div>
 
       {/* Save Button */}
