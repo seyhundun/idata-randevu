@@ -1559,8 +1559,9 @@ async function mainLoop() {
           const ip = getNextIp();
           let browser, page;
           try {
-            console.log(`\n🔄 IP Rotasyonu: ${ip || "doğrudan"} (deneme ${attempt}/3)`);
-            await idataLog("login_start", `Giriş: ${account.email} | IP: ${ip || "doğrudan"} | Deneme: ${attempt}/3`);
+            const proxyLabel = getProxyLabel(ip);
+            console.log(`\n🔄 IP Rotasyonu: ${proxyLabel} (deneme ${attempt}/3)`);
+            await idataLog("login_start", `Giriş: ${account.email} | IP: ${proxyLabel} | Deneme: ${attempt}/3`);
             ({ browser, page } = await launchBrowser(ip));
             
             const loginResult = await loginToIdata(page, account);
