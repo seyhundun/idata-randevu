@@ -134,6 +134,7 @@ export default function BotSettingsPanel() {
   const saveAllSettings = async () => {
     setSavingSettings(true);
     const keys = [
+      { key: "proxy_enabled", label: "Proxy Aktif" },
       { key: "proxy_host", label: "Proxy Host" },
       { key: "proxy_port", label: "Proxy Port" },
       { key: "proxy_user", label: "Proxy Kullanıcı" },
@@ -313,8 +314,26 @@ export default function BotSettingsPanel() {
         </div>
       </div>
 
-      {/* Proxy Settings */}
+      {/* Proxy Toggle */}
       <div className="space-y-3 border-t border-border pt-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs font-medium">Proxy Kullan</Label>
+            <p className="text-[10px] text-muted-foreground">
+              {getDraft("proxy_enabled") === "false" 
+                ? "Kapalı — sunucu kendi IP'si ile çıkıyor" 
+                : "Açık — Evomi residential proxy üzerinden çıkıyor"}
+            </p>
+          </div>
+          <Switch
+            checked={getDraft("proxy_enabled") !== "false"}
+            onCheckedChange={(checked) => setDraftValue("proxy_enabled", checked ? "true" : "false")}
+          />
+        </div>
+      </div>
+
+      {/* Proxy Settings */}
+      <div className={`space-y-3 border-t border-border pt-4 ${getDraft("proxy_enabled") === "false" ? "opacity-40 pointer-events-none" : ""}`}>
         <div className="space-y-1">
           <Label className="text-[11px] text-muted-foreground">Proxy IP (Host)</Label>
           <Input
