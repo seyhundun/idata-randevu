@@ -19,8 +19,14 @@ const CONFIG = {
   OTP_POLL_MS: Number(process.env.OTP_POLL_MS || 5000),
 };
 
+// ==================== CAPTCHA PROVIDER ====================
+const CAPTCHA_PROVIDER = (process.env.CAPTCHA_PROVIDER || "auto").toLowerCase();
+const CAPSOLVER_API_KEY = (process.env.CAPSOLVER_API_KEY || "").trim();
+
 console.log("🇮🇹 iDATA İtalya Botu v1.0 başlatılıyor...");
-console.log(`🔐 CAPTCHA API key: ${CONFIG.CAPTCHA_API_KEY ? `var (${CONFIG.CAPTCHA_API_KEY.length} karakter)` : "yok"}`);
+console.log(`🔐 CAPTCHA Provider: ${CAPTCHA_PROVIDER}`);
+console.log(`🔐 2captcha API key: ${CONFIG.CAPTCHA_API_KEY ? `var (${CONFIG.CAPTCHA_API_KEY.length} karakter)` : "yok"}`);
+if (CAPSOLVER_API_KEY) console.log(`🔐 Capsolver API key: var (${CAPSOLVER_API_KEY.length} karakter)`);
 
 // ==================== IP ROTATION ====================
 const IP_LIST = (process.env.IP_LIST || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -347,7 +353,8 @@ async function clearCfBlocked() {
 
 
 async function solveImageCaptcha(page) {
-  if (!CONFIG.CAPTCHA_API_KEY) {
+  const hasAnyCaptchaKey = CONFIG.CAPTCHA_API_KEY || CAPSOLVER_API_KEY;
+  if (!hasAnyCaptchaKey) {
     console.log("  [CAPTCHA] ⚠ API key yok, CAPTCHA çözülemez!");
     return null;
   }
@@ -384,50 +391,91 @@ async function solveImageCaptcha(page) {
       return null;
     }
 
-    console.log("  [CAPTCHA] 📸 Captcha resmi bulundu, 2captcha'ya gönderiliyor...");
+    console.log("  [CAPTCHA] 📸 Captcha resmi bulundu, çözülüyor...");
 
-    // 2captcha API — createTask
-    const createRes = await fetch("https://api.2captcha.com/createTask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientKey: CONFIG.CAPTCHA_API_KEY,
-        task: {
-          type: "ImageToTextTask",
-          body: captchaImgBase64,
-          case: false,
-          minLength: 4,
-          maxLength: 6,
-        },
-      }),
-    });
-    const createData = await createRes.json();
-    if (createData.errorId !== 0) {
-      console.log(`  [CAPTCHA] ❌ 2captcha hata: ${createData.errorDescription || createData.errorCode}`);
-      return null;
+    const useCapsolver = CAPSOLVER_API_KEY && (CAPTCHA_PROVIDER === "capsolver" || CAPTCHA_PROVIDER === "auto");
+    const use2captcha = CONFIG.CAPTCHA_API_KEY && (CAPTCHA_PROVIDER === "2captcha" || CAPTCHA_PROVIDER === "auto");
+
+    // Capsolver ile dene
+    if (useCapsolver) {
+      try {
+        console.log("  [CAPTCHA] Capsolver ile çözülüyor...");
+        const createRes = await fetch("https://api.capsolver.com/createTask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientKey: CAPSOLVER_API_KEY,
+            task: { type: "ImageToTextTask", body: captchaImgBase64 },
+          }),
+        });
+        const createData = await createRes.json();
+        if (createData.errorId === 0 && createData.taskId) {
+          for (let i = 0; i < 30; i++) {
+            await delay(2000, 4000);
+            const resultRes = await fetch("https://api.capsolver.com/getTaskResult", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ clientKey: CAPSOLVER_API_KEY, taskId: createData.taskId }),
+            });
+            const resultData = await resultRes.json();
+            if (resultData.status === "ready") {
+              const code = resultData.solution?.text;
+              console.log(`  [CAPTCHA] ✅ Capsolver çözüldü: ${code}`);
+              return code;
+            }
+            if (resultData.errorId !== 0) break;
+          }
+        }
+        console.log("  [CAPTCHA] Capsolver başarısız, devam ediliyor...");
+      } catch (err) {
+        console.log(`  [CAPTCHA] Capsolver hata: ${err.message}`);
+      }
     }
 
-    const taskId = createData.taskId;
-    console.log(`  [CAPTCHA] Task oluşturuldu: ${taskId}`);
-
-    // Sonuç bekle
-    for (let i = 0; i < 30; i++) {
-      await delay(3000, 5000);
-      const resultRes = await fetch("https://api.2captcha.com/getTaskResult", {
+    // 2captcha ile dene
+    if (use2captcha) {
+      console.log("  [CAPTCHA] 2captcha ile çözülüyor...");
+      const createRes = await fetch("https://api.2captcha.com/createTask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientKey: CONFIG.CAPTCHA_API_KEY, taskId }),
+        body: JSON.stringify({
+          clientKey: CONFIG.CAPTCHA_API_KEY,
+          task: {
+            type: "ImageToTextTask",
+            body: captchaImgBase64,
+            case: false,
+            minLength: 4,
+            maxLength: 6,
+          },
+        }),
       });
-      const resultData = await resultRes.json();
-
-      if (resultData.status === "ready") {
-        const code = resultData.solution?.text;
-        console.log(`  [CAPTCHA] ✅ Çözüldü: ${code}`);
-        return code;
-      }
-      if (resultData.errorId !== 0) {
-        console.log(`  [CAPTCHA] ❌ Sonuç hatası: ${resultData.errorDescription}`);
+      const createData = await createRes.json();
+      if (createData.errorId !== 0) {
+        console.log(`  [CAPTCHA] ❌ 2captcha hata: ${createData.errorDescription || createData.errorCode}`);
         return null;
+      }
+
+      const taskId = createData.taskId;
+      console.log(`  [CAPTCHA] 2captcha task: ${taskId}`);
+
+      for (let i = 0; i < 30; i++) {
+        await delay(3000, 5000);
+        const resultRes = await fetch("https://api.2captcha.com/getTaskResult", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientKey: CONFIG.CAPTCHA_API_KEY, taskId }),
+        });
+        const resultData = await resultRes.json();
+
+        if (resultData.status === "ready") {
+          const code = resultData.solution?.text;
+          console.log(`  [CAPTCHA] ✅ 2captcha çözüldü: ${code}`);
+          return code;
+        }
+        if (resultData.errorId !== 0) {
+          console.log(`  [CAPTCHA] ❌ Sonuç hatası: ${resultData.errorDescription}`);
+          return null;
+        }
       }
     }
 
