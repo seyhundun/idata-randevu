@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LogOut, Clock, PanelLeftClose, PanelLeft } from "lucide-react";
+import { LogOut, Clock, PanelLeftClose, PanelLeft, Network, Globe, Settings } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import ControlPanel from "@/components/ControlPanel";
 import ModuleStatus from "@/components/ModuleStatus";
 import BotActions from "@/components/BotActions";
