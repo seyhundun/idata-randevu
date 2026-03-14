@@ -1873,14 +1873,12 @@ async function loginToIdata(page, account) {
       await delay(1000, 2000);
 
       // Doğrula/Giriş butonuna tıkla
-      await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll("button, input[type='submit']"));
-        const verifyBtn = btns.find(b => {
-          const txt = (b.textContent || b.value || "").toLowerCase();
-          return txt.includes("doğrula") || txt.includes("onayla") || txt.includes("giriş") || txt.includes("verify") || txt.includes("gönder");
-        }) || document.querySelector('button[type="submit"]');
-        if (verifyBtn) verifyBtn.click();
-      });
+      const otpSubmit = await clickAuthSubmitButton(page, "otp_submit");
+      if (!otpSubmit?.found) {
+        const ss = await takeScreenshotBase64(page);
+        await idataLog("login_fail", `OTP sonrası submit bulunamadı`, ss);
+        return { success: false, reason: "otp_submit_not_found", screenshot: ss };
+      }
       await delay(5000, 8000);
 
       // OTP'yi temizle
