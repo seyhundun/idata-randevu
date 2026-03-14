@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
 import {
   CheckCircle2, Search, AlertCircle, Clock, Image as ImageIcon, X,
   LogIn, FormInput, ShieldCheck, KeyRound, Globe, Timer, MonitorSmartphone,
-  UserPlus, MousePointer, Wifi, Ban, RefreshCw, Network
+  UserPlus, MousePointer, Wifi, Ban, RefreshCw, Network, Trash2
 } from "lucide-react";
 
 interface LogEntry {
