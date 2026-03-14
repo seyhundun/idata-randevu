@@ -59,15 +59,16 @@ const IP_BAN_DURATION_MS = Number(process.env.IP_BAN_DURATION_MS || 1800000);
 let ipBannedUntil = new Map();
 let residentialSessionId = 0;
 
-// ==================== PROXY CITY ROTATION ====================
-const PROXY_CITIES = ["ankara", "adana", "konya", "istanbul", "izmir", "bursa", "antalya"];
-let currentCityIndex = -1;
+// ==================== PROXY REGION ROTATION ====================
+const PROXY_REGIONS = ["ankara", "adana", "konya", "istanbul", "izmir", "bursa", "antalya"];
+let currentRegionIndex = -1;
+const PROXY_ISP_LIST = "vodafonenetdslm,turkcellinterne,vodafonenetadsl,superonlinebroa,turktelekom,turktelekomunik,vodafoneturkey,vodafonenetdslk";
 
-function getNextProxyCity() {
-  currentCityIndex = (currentCityIndex + 1) % PROXY_CITIES.length;
-  const city = PROXY_CITIES[currentCityIndex];
-  console.log(`  [PROXY] 🏙 Şehir rotasyonu: ${city} (${currentCityIndex + 1}/${PROXY_CITIES.length})`);
-  return city;
+function getNextProxyRegion() {
+  currentRegionIndex = (currentRegionIndex + 1) % PROXY_REGIONS.length;
+  const region = PROXY_REGIONS[currentRegionIndex];
+  console.log(`  [PROXY] 🏙 Bölge rotasyonu: ${region} (${currentRegionIndex + 1}/${PROXY_REGIONS.length})`);
+  return region;
 }
 
 function getNextIp() {
@@ -1509,13 +1510,12 @@ function cleanupUserDataDir(dir) {
 }
 
 function getResidentialProxyUrl() {
-  // Her çağrıda yeni session ID = yeni IP + şehir rotasyonu
-  // Evomi formatı: parametreler PASSWORD'a eklenir (username değil)
+  // Evomi uzman format: password_country-TR_region-ankara_isp-xxx_session-ID
   residentialSessionId++;
   const sessionId = `${Date.now()}_${residentialSessionId}`;
-  const city = getNextProxyCity();
-  const pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}_city-${city}_session-${sessionId}`;
-  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (session: ${sessionId}, ülke: ${EVOMI_PROXY_COUNTRY}, şehir: ${city})`);
+  const region = getNextProxyRegion();
+  const pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}_region-${region}_isp-${PROXY_ISP_LIST}_session-${sessionId}`;
+  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (session: ${sessionId}, ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${region}, ISP filtreli)`);
   return { proxyUrl: `http://${EVOMI_PROXY_USER}:${pass}@${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT}`, user: EVOMI_PROXY_USER, pass, host: EVOMI_PROXY_HOST, port: EVOMI_PROXY_PORT, city };
 }
 
