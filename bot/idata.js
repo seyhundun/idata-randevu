@@ -985,6 +985,7 @@ async function solveImageCaptcha(page, options = {}) {
               type: "ImageToTextTask",
               body: captchaImgBase64,
               case: false,
+              numeric: 1,
               minLength: 4,
               maxLength: 6,
             },
@@ -1176,67 +1177,115 @@ async function waitForLoginOtp(accountId, timeoutMs = 180000) {
 
 // ==================== AUTH SUBMIT HELPER ====================
 async function clickAuthSubmitButton(page, phase = "login") {
-  const result = await page.evaluate(() => {
+  const phaseText = String(phase || "").toLowerCase();
+
+  const result = await page.evaluate((phaseText) => {
+    const normalize = (value) => String(value || "").trim().toLowerCase().normalize("NFC");
+
     const isVisible = (el) => {
+      if (!el) return false;
       const rect = el.getBoundingClientRect();
       const st = window.getComputedStyle(el);
-      return rect.width > 20 && rect.height > 20 && st.visibility !== "hidden" && st.display !== "none";
+      return rect.width > 8 && rect.height > 8 && st.visibility !== "hidden" && st.display !== "none" && st.opacity !== "0";
     };
 
-    const textOf = (el) => ((el.textContent || el.value || el.getAttribute("value") || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFC"));
+    const isOtpPhase = /otp|doğrula|dogrula|verify|mailconfirm/.test(phaseText);
+    const isLoginPhase = /login|giris|ilk_giris|son_retry|captcha_retry/.test(phaseText);
 
-    const all = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], a, [role='button']"))
-      .filter(isVisible);
+    const getMeta = (el) => normalize([
+      el.textContent || "",
+      el.getAttribute("value") || "",
+      el.getAttribute("aria-label") || "",
+      el.getAttribute("title") || "",
+      el.getAttribute("name") || "",
+      el.id || "",
+      el.className || "",
+      el.getAttribute("type") || "",
+    ].join(" "));
 
-    const scored = all.map((el) => {
-      const txt = textOf(el);
-      let score = 0;
-      if (/^(giriş|giris|login|sign in|oturum aç)$/.test(txt)) score += 120;
-      else if (/(giriş|giris|login|sign in|oturum)/.test(txt)) score += 90;
-      if (/(doğrula|dogrula|onayla|verify|gönder|submit|devam)/.test(txt)) score += 70;
-      if ((el.type || "").toLowerCase() === "submit") score += 25;
-      if (el.hasAttribute("disabled")) score -= 50;
-      return { el, txt, score };
-    }).sort((a, b) => b.score - a.score);
+    const otpInput = Array.from(document.querySelectorAll("input")).find((inp) => {
+      const meta = getMeta(inp);
+      return /otp|mail.?confirm|verification|e-?posta.*kod|do[gğ]rulama.*kodu/.test(meta);
+    });
 
-    let target = scored[0]?.el || document.querySelector('button[type="submit"], input[type="submit"]');
+    const candidates = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button'], input[type='image'], a, [role='button'], div[onclick], span[onclick]"))
+      .filter(isVisible)
+      .map((el) => {
+        const meta = getMeta(el);
+        let score = 0;
+
+        if (/(kayıt ol|kayit ol|register|üye ol|uye ol|forgot|şifremi unuttum|sifremi unuttum|parolamı unuttum)/.test(meta)) score -= 140;
+
+        if (/(giriş|giris|login|sign in|oturum aç|oturum ac)/.test(meta)) score += isLoginPhase ? 140 : 45;
+        if (/(doğrula|dogrula|onayla|verify|do[gğ]rulama|submit|devam)/.test(meta)) score += isOtpPhase ? 130 : 70;
+
+        if ((el.getAttribute("type") || "").toLowerCase() === "submit") score += 24;
+        if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") score -= 50;
+
+        const form = el.closest?.("form");
+        if (form) score += 10;
+
+        if (otpInput && form && otpInput.closest?.("form") === form) {
+          score += isOtpPhase ? 85 : 25;
+        }
+
+        if (form) {
+          const hasPassword = !!form.querySelector('input[type="password"]');
+          const hasCaptcha = !!form.querySelector('input[name*="captcha" i], input[id*="captcha" i], input[name*="mailconfirm" i], input[id*="mailconfirm" i], input[placeholder*="doğrulama" i], input[placeholder*="captcha" i]');
+          if (hasPassword) score += isLoginPhase ? 45 : 10;
+          if (hasCaptcha) score += 20;
+        }
+
+        const rect = el.getBoundingClientRect();
+        if (rect.top > window.innerHeight * 0.2 && rect.top < window.innerHeight * 0.95) score += 8;
+
+        return { el, text: meta.slice(0, 60), score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const target = candidates[0]?.el || null;
 
     if (target) {
+      target.scrollIntoView?.({ block: "center", inline: "center", behavior: "instant" });
       target.removeAttribute?.("disabled");
       target.removeAttribute?.("aria-disabled");
-      target.classList?.remove("disabled");
+      target.classList?.remove?.("disabled");
+      target.focus?.();
 
-      const fire = (type) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-      fire("mouseover");
-      fire("mousedown");
-      fire("mouseup");
-      target.click();
+      const fireMouse = (type) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      const firePointer = (type) => {
+        try {
+          target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "mouse" }));
+        } catch {
+          // PointerEvent her ortamda olmayabilir
+        }
+      };
 
-      const form = target.closest?.("form") || document.querySelector("form");
-      if (form) {
-        if (typeof form.requestSubmit === "function") form.requestSubmit();
-      }
+      firePointer("pointerdown");
+      fireMouse("mousedown");
+      firePointer("pointerup");
+      fireMouse("mouseup");
+      fireMouse("click");
+      try { target.click?.(); } catch {}
 
       return {
         found: true,
         tag: target.tagName,
-        text: textOf(target).slice(0, 40),
-        score: scored[0]?.score ?? null,
+        text: candidates[0]?.text || "",
+        score: candidates[0]?.score ?? null,
       };
     }
 
-    const form = document.querySelector("form");
-    if (form) {
-      if (typeof form.requestSubmit === "function") form.requestSubmit();
-      else form.submit();
+    const forms = Array.from(document.querySelectorAll("form"));
+    const bestForm = forms.find((form) => otpInput ? otpInput.closest("form") === form : form.querySelector('input[type="password"]')) || forms[0];
+    if (bestForm) {
+      if (typeof bestForm.requestSubmit === "function") bestForm.requestSubmit();
+      else bestForm.submit?.();
       return { found: true, tag: "FORM", text: "form.submit", score: null };
     }
 
     return { found: false };
-  });
+  }, phaseText);
 
   console.log(`  [LOGIN] Submit (${phase}):`, result);
   await idataLog("login_form", `Submit (${phase}): ${result?.found ? `${result.tag} \"${result.text}\"` : "BULUNAMADI"}`);
@@ -1505,35 +1554,90 @@ async function loginToIdata(page, account) {
     }).catch(() => {});
     await delay(1000, 2000);
 
-    // Form alanlarını pozisyon bazlı doldur (iDATA tüm inputları type="text" kullanıyor)
-    const formInputs = await page.$$('input[type="text"], input[type="email"], input[type="password"]');
-    console.log(`  [LOGIN] Form'da ${formInputs.length} input bulundu`);
+    // Form inputlarını görünür/editable filtreyle eşleştir (gizli input karışmasın)
+    const allInputs = await page.$$("input");
+    const textCandidates = [];
+    const passwordCandidates = [];
 
-    // Alanları sırayla tanımla
-    // iDATA login formu sırası: 1) Üyelik No, 2) E-Posta, 3) Şifre, 4) CAPTCHA Kodu
-    const passwordInputs = await page.$$('input[type="password"]');
-    const textInputs = await page.$$('input[type="text"], input[type="email"]');
-    
-    // 1) Üyelik numarası — ilk text input
-    if (account.membership_number && textInputs[0]) {
+    for (const input of allInputs) {
+      const meta = await page.evaluate((el) => {
+        const type = (el.type || "text").toLowerCase();
+        const rect = el.getBoundingClientRect();
+        const st = window.getComputedStyle(el);
+        const visible = rect.width > 8 && rect.height > 8 && st.display !== "none" && st.visibility !== "hidden";
+        const editable = !el.disabled && !el.readOnly;
+        const textLike = !["hidden", "submit", "button", "checkbox", "radio", "file"].includes(type);
+        const norm = (value) => String(value || "").toLowerCase().normalize("NFC");
+        const metaText = norm([
+          el.name,
+          el.id,
+          el.placeholder,
+          el.getAttribute("aria-label"),
+          el.getAttribute("autocomplete"),
+        ].filter(Boolean).join(" "));
+
+        return {
+          type,
+          visible,
+          editable,
+          textLike,
+          metaText,
+          isCaptcha: /captcha|mailconfirm|do[gğ]rulama|verification/.test(metaText),
+          isMembership: /üyelik|uyelik|membership|member/.test(metaText),
+          isEmail: /e-?posta|email|mail/.test(metaText),
+        };
+      }, input);
+
+      if (!meta.visible || !meta.editable) continue;
+      if (meta.type === "password") {
+        passwordCandidates.push({ el: input, meta });
+        continue;
+      }
+      if (!meta.textLike) continue;
+      textCandidates.push({ el: input, meta });
+    }
+
+    const nonCaptchaTextInputs = textCandidates.filter((item) => !item.meta.isCaptcha);
+    let preDetectedCaptchaInput = textCandidates.find((item) => item.meta.isCaptcha)?.el || null;
+
+    const membershipInput = nonCaptchaTextInputs.find((item) => item.meta.isMembership)?.el || null;
+    const emailInput = nonCaptchaTextInputs.find((item) => item.meta.isEmail && item.el !== membershipInput)?.el || null;
+    const primaryAuthInput = membershipInput || emailInput || nonCaptchaTextInputs[0]?.el || null;
+    const secondaryAuthInput = nonCaptchaTextInputs.find((item) => item.el !== primaryAuthInput)?.el || null;
+
+    console.log(`  [LOGIN] Görünür input: text=${textCandidates.length}, auth=${nonCaptchaTextInputs.length}, password=${passwordCandidates.length}`);
+    await idataLog("login_form", `Input eşleştirme: auth=${nonCaptchaTextInputs.length}, pass=${passwordCandidates.length}, captcha=${preDetectedCaptchaInput ? "var" : "yok"}`);
+
+    // 1) Üyelik/kimlik alanı
+    if (account.membership_number && primaryAuthInput) {
       console.log(`  [LOGIN] Üyelik no giriliyor: ${account.membership_number}`);
-      const typed = await humanType(page, textInputs[0], account.membership_number, { minDelay: 140, maxDelay: 300, retries: 3 });
+      const typed = await humanType(page, primaryAuthInput, account.membership_number, { minDelay: 140, maxDelay: 300, retries: 3 });
       if (!typed) console.log("  [LOGIN] ⚠ Üyelik no tam yazılamadı");
       await delay(700, 1200);
     }
 
-    // 2) E-Posta — ikinci text input
-    if (textInputs[1]) {
+    // 2) E-posta alanı (ayrı input varsa oraya, yoksa gerektiğinde secondary'e)
+    if (emailInput) {
       console.log(`  [LOGIN] E-Posta giriliyor: ${account.email}`);
-      const typed = await humanType(page, textInputs[1], account.email, { minDelay: 130, maxDelay: 280, retries: 3 });
+      const typed = await humanType(page, emailInput, account.email, { minDelay: 130, maxDelay: 280, retries: 3 });
       if (!typed) console.log("  [LOGIN] ⚠ E-posta tam yazılamadı");
+      await delay(700, 1200);
+    } else if (!account.membership_number && primaryAuthInput) {
+      console.log(`  [LOGIN] E-Posta (fallback) giriliyor: ${account.email}`);
+      const typed = await humanType(page, primaryAuthInput, account.email, { minDelay: 130, maxDelay: 280, retries: 3 });
+      if (!typed) console.log("  [LOGIN] ⚠ E-posta fallback tam yazılamadı");
+      await delay(700, 1200);
+    } else if (account.membership_number && secondaryAuthInput) {
+      console.log(`  [LOGIN] E-Posta (secondary) giriliyor: ${account.email}`);
+      const typed = await humanType(page, secondaryAuthInput, account.email, { minDelay: 130, maxDelay: 280, retries: 3 });
+      if (!typed) console.log("  [LOGIN] ⚠ E-posta secondary tam yazılamadı");
       await delay(700, 1200);
     }
 
-    // 3) Şifre — password input
-    if (passwordInputs[0]) {
+    // 3) Şifre
+    if (passwordCandidates[0]?.el) {
       console.log(`  [LOGIN] Şifre giriliyor`);
-      const typed = await humanType(page, passwordInputs[0], account.password, { minDelay: 120, maxDelay: 260, retries: 3 });
+      const typed = await humanType(page, passwordCandidates[0].el, account.password, { minDelay: 120, maxDelay: 260, retries: 3 });
       if (!typed) console.log("  [LOGIN] ⚠ Şifre tam yazılamadı");
       await delay(1000, 1800);
     }
@@ -1547,11 +1651,25 @@ async function loginToIdata(page, account) {
       return { success: false, reason: "captcha_failed", screenshot: failShot };
     }
 
-    // CAPTCHA input — "Doğrulama Kodu" placeholder'lı input (iDATA'ya özel)
-    let captchaInput = null;
+    // CAPTCHA input — önce pre-detect edilen alanı dene, olmazsa DOM'da yeniden ara
+    let captchaInput = preDetectedCaptchaInput;
     let captchaTyped = false;
 
-    captchaInput = await page.evaluateHandle(() => {
+    if (captchaInput) {
+      const inputInfo = await page.evaluate(el => ({
+        placeholder: el?.placeholder || '',
+        name: el?.name || '',
+        id: el?.id || '',
+      }), captchaInput).catch(() => null);
+
+      if (inputInfo) {
+        console.log(`  [LOGIN] CAPTCHA kodu giriliyor (pre-detect): ${captchaCode} → input(placeholder="${inputInfo.placeholder}" name="${inputInfo.name}" id="${inputInfo.id}")`);
+        await idataLog("login_captcha", `CAPTCHA input hedef (pre): placeholder="${inputInfo.placeholder}" name="${inputInfo.name}" id="${inputInfo.id}"`);
+        captchaTyped = await humanType(page, captchaInput, captchaCode, { minDelay: 140, maxDelay: 300, retries: 2 });
+      }
+    }
+
+    if (!captchaTyped) captchaInput = await page.evaluateHandle(() => {
       // Tüm görünür text-like input'ları topla (type attribute olmayan input'lar dahil)
       const allInputs = Array.from(document.querySelectorAll('input')).filter(inp => {
         const t = (inp.type || 'text').toLowerCase();
@@ -1611,7 +1729,7 @@ async function loginToIdata(page, account) {
       return emptyInput || null;
     });
 
-    if (captchaInput && captchaInput.asElement()) {
+    if (!captchaTyped && captchaInput && captchaInput.asElement()) {
       captchaInput = captchaInput.asElement();
       const inputInfo = await page.evaluate(el => ({
         placeholder: el.placeholder || '',
