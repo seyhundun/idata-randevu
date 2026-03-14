@@ -177,8 +177,10 @@ export default function IdataAccounts() {
   };
 
   const saveAccount = async () => {
-    if (!form.first_name || !form.last_name) {
-      toast.error("İsim ve soyisim gerekli");
+    const hasMembership = !!form.membership_number?.trim();
+    // Üyelik no varsa sadece email+şifre yeterli, yoksa isim+soyisim de gerekli
+    if (!hasMembership && (!form.first_name || !form.last_name)) {
+      toast.error("İsim ve soyisim gerekli (veya üyelik numarası girin)");
       return;
     }
     setLoading(true);
