@@ -160,6 +160,8 @@ export default function IdataAccounts() {
       invoice_district: acc.invoice_district || "",
       invoice_address: acc.invoice_address || "",
       membership_number: acc.membership_number || "",
+      imap_host: acc.imap_host || "imap.gmail.com",
+      imap_password: acc.imap_password || "",
     });
     setEditingId(acc.id);
     setShowForm(true);
