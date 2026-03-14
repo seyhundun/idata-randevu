@@ -35,7 +35,8 @@ async function loadProxySettingsFromDB() {
       if (map.proxy_country) EVOMI_PROXY_COUNTRY = map.proxy_country;
       if (map.proxy_host) EVOMI_PROXY_HOST = map.proxy_host;
       if (map.proxy_port) EVOMI_PROXY_PORT = Number(map.proxy_port);
-      console.log(`  [DB] ✅ Proxy ayarları DB'den yüklendi: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} ülke=${EVOMI_PROXY_COUNTRY}`);
+      if (map.proxy_region !== undefined) EVOMI_PROXY_REGION = map.proxy_region;
+      console.log(`  [DB] ✅ Proxy ayarları DB'den yüklendi: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} ülke=${EVOMI_PROXY_COUNTRY} bölge=${EVOMI_PROXY_REGION || 'yok'}`);
     }
   } catch (e) {
     console.warn(`  [DB] ⚠️ DB'den proxy ayarı okunamadı, .env kullanılıyor: ${e.message}`);
