@@ -186,29 +186,93 @@ const VIEWPORTS = [
 
 function getRandomItem(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-// İnsan benzeri yazma
+function normalizeTypedValue(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[()\-]/g, "");
+}
+
+function isTypedValueMatch(expected, actual) {
+  const expectedRaw = String(expected ?? "").trim();
+  const actualRaw = String(actual ?? "").trim();
+
+  if (!expectedRaw) return actualRaw.length === 0;
+  if (actualRaw === expectedRaw) return true;
+
+  const expectedNorm = normalizeTypedValue(expectedRaw);
+  const actualNorm = normalizeTypedValue(actualRaw);
+
+  if (actualNorm === expectedNorm) return true;
+
+  // Telefon gibi alanlarda maske/prefix olabilir
+  if (/^\d+$/.test(expectedNorm) && actualNorm.endsWith(expectedNorm)) return true;
+
+  return false;
+}
+
+async function getInputValue(page, element) {
+  return await page.evaluate((el) => {
+    if (!el) return "";
+    if ("value" in el) return el.value || "";
+    return el.textContent || "";
+  }, element);
+}
+
+// İnsan benzeri yazma (yavaş + doğrulamalı)
 async function humanType(page, selector, text, options = {}) {
-  const { minDelay = 120, maxDelay = 350 } = options;
+  const {
+    minDelay = 170,
+    maxDelay = 420,
+    retries = 3,
+    verify = true,
+  } = options;
+
+  const valueToType = String(text ?? "");
   const element = typeof selector === "string" ? await page.$(selector) : selector;
   if (!element) return false;
 
-  await element.click({ clickCount: 1 });
-  await delay(400, 900);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await element.click({ clickCount: 1 });
+      await delay(200, 450);
 
-  // Temizle
-  await page.keyboard.down("Control");
-  await page.keyboard.press("a");
-  await page.keyboard.up("Control");
-  await page.keyboard.press("Backspace");
-  await delay(200, 500);
+      // Temizle (hem klavye hem DOM)
+      await page.keyboard.down("Control");
+      await page.keyboard.press("a");
+      await page.keyboard.up("Control");
+      await page.keyboard.press("Backspace");
+      await page.evaluate((el) => {
+        if (el && "value" in el) {
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }, element).catch(() => {});
+      await delay(120, 260);
 
-  for (const ch of String(text)) {
-    const keyDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-    await page.keyboard.type(ch, { delay: keyDelay });
-    if (Math.random() < 0.15) await delay(300, 800);
+      for (const ch of valueToType) {
+        const keyDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+        await element.type(ch, { delay: keyDelay });
+        if (Math.random() < 0.2) await delay(120, 320);
+      }
+
+      await delay(220, 500);
+
+      if (!verify) return true;
+
+      const currentValue = await getInputValue(page, element);
+      if (isTypedValueMatch(valueToType, currentValue)) return true;
+
+      console.log(`  [TYPE] ⚠ Alan doğrulama başarısız (deneme ${attempt}/${retries}): beklenen="${valueToType}" okunan="${currentValue}"`);
+      await delay(250, 500);
+    } catch (err) {
+      console.log(`  [TYPE] ⚠ Yazma denemesi başarısız (${attempt}/${retries}): ${err.message}`);
+      await delay(250, 500);
+    }
   }
-  await delay(300, 700);
-  return true;
+
+  return false;
 }
 
 async function humanMove(page) {
