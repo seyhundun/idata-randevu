@@ -1095,10 +1095,12 @@ async function registerAccount(page, account) {
 
     // ===== GÖRSEL CAPTCHA =====
     console.log("  [CAPTCHA] Görsel CAPTCHA çözülüyor...");
-    const captchaCode = await solveImageCaptcha(page);
+    const captchaCode = await solveImageCaptcha(page, { maxAttempts: 3 });
     if (!captchaCode) {
-      console.log("  [CAPTCHA] ❌ CAPTCHA çözülemedi!");
-      return { success: false, reason: "captcha_failed" };
+      console.log("  [CAPTCHA] ❌ CAPTCHA çözülemedi! Sayfa 10 sn açık tutuluyor...");
+      const failShot = await takeScreenshotBase64(page);
+      await delay(9000, 12000);
+      return { success: false, reason: "captcha_failed", screenshot: failShot };
     }
 
     // Captcha input alanına yaz
