@@ -1023,6 +1023,47 @@ function parse2CaptchaResponse(raw) {
   return { ok: false, error: text || "unknown" };
 }
 
+// ==================== CAPSOLVER TURNSTILE ====================
+async function solveTurnstileWithCapsolver({ sitekey, pageurl, action, data, pagedata, userAgent }) {
+  if (!CAPSOLVER_API_KEY) throw new Error("CAPSOLVER_API_KEY yok");
+
+  const task = { type: "AntiTurnstileTaskProxyLess", websiteURL: pageurl, websiteKey: sitekey };
+  if (action) task.metadata = { ...task.metadata, action };
+
+  const createRes = await fetch("https://api.capsolver.com/createTask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientKey: CAPSOLVER_API_KEY, task }),
+  });
+  const createData = await createRes.json();
+  if (createData.errorId !== 0) throw new Error(`Capsolver createTask: ${createData.errorDescription || createData.errorCode}`);
+
+  const taskId = createData.taskId;
+  console.log(`  [CAPTCHA] Capsolver task: ${taskId}`);
+
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    await delay(2000, 3500);
+    const resultRes = await fetch("https://api.capsolver.com/getTaskResult", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientKey: CAPSOLVER_API_KEY, taskId }),
+    });
+    const resultData = await resultRes.json();
+
+    if (resultData.status === "ready") {
+      const token = resultData.solution?.token;
+      if (token) {
+        console.log(`  [CAPTCHA] ✅ Capsolver çözüldü!`);
+        return token;
+      }
+    }
+    if (resultData.errorId !== 0) throw new Error(`Capsolver getTaskResult: ${resultData.errorDescription}`);
+    if (resultData.status === "processing") continue;
+  }
+  throw new Error("Capsolver timeout");
+}
+
+// ==================== 2CAPTCHA TURNSTILE ====================
 async function solveTurnstileWithHttp({ sitekey, pageurl, action, data, pagedata, userAgent }) {
   if (!CONFIG.CAPTCHA_API_KEY) throw new Error("CAPTCHA_API_KEY yok");
 
@@ -1070,6 +1111,45 @@ async function solveTurnstileWithHttp({ sitekey, pageurl, action, data, pagedata
   }
 
   throw new Error("2captcha timeout");
+}
+
+// ==================== UNIFIED TURNSTILE SOLVER ====================
+async function solveWithProvider(payload) {
+  const useCapsolver = CAPSOLVER_API_KEY && (CAPTCHA_PROVIDER === "capsolver" || CAPTCHA_PROVIDER === "auto");
+  const use2captcha = CONFIG.CAPTCHA_API_KEY && (CAPTCHA_PROVIDER === "2captcha" || CAPTCHA_PROVIDER === "auto");
+
+  // Capsolver öncelikli (auto modda)
+  if (useCapsolver) {
+    try {
+      return await solveTurnstileWithCapsolver(payload);
+    } catch (err) {
+      console.log(`  [CAPTCHA] Capsolver başarısız: ${err.message}`);
+      if (CAPTCHA_PROVIDER === "capsolver") throw err; // sadece capsolver modda hata fırlat
+    }
+  }
+
+  // 2captcha fallback
+  if (use2captcha) {
+    try {
+      // SDK dene
+      if (Solver) {
+        try {
+          const solver = new (Solver.Solver || Solver)(CONFIG.CAPTCHA_API_KEY);
+          const result = await solver.cloudflareTurnstile(payload);
+          const token = result?.data || result?.token || result?.request || result?.code || "";
+          if (token) return token;
+        } catch (sdkErr) {
+          console.log(`  [CAPTCHA] 2captcha SDK başarısız: ${sdkErr.message}`);
+        }
+      }
+      return await solveTurnstileWithHttp(payload);
+    } catch (err) {
+      console.log(`  [CAPTCHA] 2captcha başarısız: ${err.message}`);
+      throw err;
+    }
+  }
+
+  throw new Error("Hiçbir CAPTCHA provider yapılandırılmamış");
 }
 
 async function solveTurnstile(page) {
