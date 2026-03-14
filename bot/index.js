@@ -11,7 +11,7 @@ require("dotenv").config();
 let PROXY_ENABLED = true;
 // Proxy modu: "datacenter" (varsayılan, microsocks SOCKS5) veya "residential" (Evomi HTTP)
 const PROXY_MODE = (process.env.PROXY_MODE || "residential").toLowerCase();
-let EVOMI_PROXY_HOST = process.env.EVOMI_PROXY_HOST || "core-residential.evomi-proxy.com";
+let EVOMI_PROXY_HOST = process.env.EVOMI_PROXY_HOST || "rp.evomi.com";
 let EVOMI_PROXY_PORT = Number(process.env.EVOMI_PROXY_PORT || 1000);
 let EVOMI_PROXY_USER = process.env.EVOMI_PROXY_USER || "";
 let EVOMI_PROXY_PASS = process.env.EVOMI_PROXY_PASS || "";
@@ -1563,7 +1563,7 @@ async function launchBrowser(proxyIp = null) {
     // Evomi residential proxy - connect() proxy parametresi ile auth popup'ı önle
     const rp = getResidentialProxyUrl();
     proxyConfig = {
-      host: `http://${rp.host}`,
+      host: rp.host,
       port: rp.port,
       username: rp.user,
       password: rp.pass,
@@ -1580,6 +1580,7 @@ async function launchBrowser(proxyIp = null) {
     headless: false,
     args,
     turnstile: true,
+    disableXvfb: true,
   };
   if (proxyConfig) {
     connectOptions.proxy = proxyConfig;
