@@ -1461,12 +1461,12 @@ function cleanupUserDataDir(dir) {
 
 function getResidentialProxyUrl() {
   // Her çağrıda yeni session ID = yeni IP
+  // Evomi formatı: parametreler PASSWORD'a eklenir (username değil)
   residentialSessionId++;
-  const sessionPart = `session-${EVOMI_PROXY_COUNTRY.toLowerCase()}_${residentialSessionId}_${Date.now()}`;
-  const user = `${EVOMI_PROXY_USER}-country-${EVOMI_PROXY_COUNTRY.toLowerCase()}-session-${sessionPart}`;
-  const proxyUrl = `http://${user}:${EVOMI_PROXY_PASS}@${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT}`;
-  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (session: ${sessionPart})`);
-  return { proxyUrl, user, pass: EVOMI_PROXY_PASS, host: EVOMI_PROXY_HOST, port: EVOMI_PROXY_PORT };
+  const sessionId = `${Date.now()}_${residentialSessionId}`;
+  const pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}_session-${sessionId}`;
+  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (session: ${sessionId}, ülke: ${EVOMI_PROXY_COUNTRY})`);
+  return { proxyUrl: `http://${EVOMI_PROXY_USER}:${pass}@${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT}`, user: EVOMI_PROXY_USER, pass, host: EVOMI_PROXY_HOST, port: EVOMI_PROXY_PORT };
 }
 
 async function launchBrowser(proxyIp = null) {
