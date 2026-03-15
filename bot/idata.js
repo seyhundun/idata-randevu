@@ -3430,18 +3430,34 @@ async function bookEarliestAppointment(page, account) {
     console.log("  [BOOK] Step 4: Turuncu saat butonu aranıyor...");
     await delay(2000, 3000);
 
-    // Önce saat butonlarının konumunu tespit et
+    // Önce saat butonlarının konumunu tespit et (sadece gerçekten tıklanabilir elemanlar)
     const timeButtonInfo = await page.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll("a, button, span, div, li, label, td"));
+      const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
       const timeButtons = [];
+
       for (const el of candidates) {
-        const text = (el.innerText || el.textContent || "").trim();
-        const timeMatch = text.match(/^(\d{2}:\d{2})$/);
+        const rawText = (el.innerText || el.textContent || el.value || "").trim();
+        const timeMatch = rawText.match(/(\d{2}:\d{2})/);
         if (!timeMatch) continue;
+
         const style = window.getComputedStyle(el);
         const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
-        if (!isVisible || el.offsetHeight < 10) continue;
-        
+        if (!isVisible || el.offsetHeight < 10 || el.offsetWidth < 20) continue;
+
+        const cls = (el.className || "").toLowerCase();
+        const tag = el.tagName;
+        const role = (el.getAttribute("role") || "").toLowerCase();
+        const isLikelyClickable = tag === "BUTTON" || tag === "A" || tag === "INPUT" || role === "button" || cls.includes("btn") || cls.includes("getdatebtnhour");
+        if (!isLikelyClickable) continue;
+
+        // Konteyner div/span yerine gerçek kontrolü hedefle
+        const childControls = Array.from(el.querySelectorAll("button, a, input"));
+        const hasNestedTimeControl = childControls.some(child => {
+          const childTxt = (child.innerText || child.textContent || child.value || "").trim();
+          return childTxt.includes(timeMatch[1]);
+        });
+        if (hasNestedTimeControl && tag !== "BUTTON" && tag !== "A" && tag !== "INPUT") continue;
+
         const bgColor = style.backgroundColor;
         const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
         let isOrange = false;
@@ -3449,103 +3465,117 @@ async function bookEarliestAppointment(page, account) {
           const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
           isOrange = r > 180 && g > 80 && b < 100;
         }
-        const cls = (el.className || "").toLowerCase();
-        if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("active")) isOrange = true;
-        
-        // ASP.NET postback bilgisi
+        if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("warning") || cls.includes("active")) isOrange = true;
+
         const href = el.getAttribute("href") || "";
         let postbackTarget = null, postbackArg = null;
         const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
         if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
-        // İçindeki <a> etiketinde de ara
-        if (!postbackTarget && el.tagName !== "A") {
-          const innerA = el.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
-          if (innerA) {
-            const aHref = innerA.getAttribute("href") || "";
-            const aPb = aHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
-            if (aPb) { postbackTarget = aPb[1]; postbackArg = aPb[2]; }
-          }
-        }
-        
+
         const rect = el.getBoundingClientRect();
-        timeButtons.push({ 
-          time: timeMatch[1], isOrange, bgColor, 
-          tag: el.tagName, cls: (el.className || "").substring(0, 100),
-          x: rect.x + rect.width / 2, 
+        timeButtons.push({
+          time: timeMatch[1],
+          isOrange,
+          bgColor,
+          tag,
+          cls: (el.className || "").substring(0, 120),
+          x: rect.x + rect.width / 2,
           y: rect.y + rect.height / 2,
-          postbackTarget, postbackArg
+          postbackTarget,
+          postbackArg,
         });
       }
-      
-      const orangeButtons = timeButtons.filter(t => t.isOrange);
-      const target = orangeButtons.length > 0 ? orangeButtons[0] : (timeButtons.length > 0 ? timeButtons[0] : null);
-      
-      return { 
-        found: !!target, target, totalSlots: timeButtons.length,
-        allSlots: timeButtons.map(t => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, pb: !!t.postbackTarget }))
+
+      const sorted = [...timeButtons].sort((a, b) => {
+        if (a.isOrange !== b.isOrange) return a.isOrange ? -1 : 1;
+        const aPreferred = /getdatebtnhour|btn-warning|btn/.test(a.cls.toLowerCase());
+        const bPreferred = /getdatebtnhour|btn-warning|btn/.test(b.cls.toLowerCase());
+        if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+        return 0;
+      });
+
+      const target = sorted.length > 0 ? sorted[0] : null;
+      return {
+        found: !!target,
+        target,
+        totalSlots: timeButtons.length,
+        allSlots: timeButtons.map(t => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, cls: t.cls.substring(0, 40), pb: !!t.postbackTarget })),
       };
     });
 
     console.log(`  [BOOK] Saat butonları: ${JSON.stringify(timeButtonInfo)}`);
-    
+
     let timeButtonResult = { clicked: false };
-    
+
     if (timeButtonInfo.found && timeButtonInfo.target) {
       const t = timeButtonInfo.target;
-      
-      // İnsan taklidi: saat alanında rastgele mouse hareketleri
-      // İnsan benzeri tıklama: bezier curve + pre-moves + mousedown/up
+      let usedMethod = "human_click";
+
+      const verifyTimeSelection = async () => {
+        return await page.evaluate((targetTime) => {
+          const controls = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
+          for (const el of controls) {
+            const txt = (el.innerText || el.textContent || el.value || "").trim();
+            if (!txt.includes(targetTime)) continue;
+
+            const style = window.getComputedStyle(el);
+            const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
+            if (!isVisible) continue;
+
+            const cls = (el.className || "").toLowerCase();
+            const ariaPressed = (el.getAttribute("aria-pressed") || "").toLowerCase();
+            const bg = style.backgroundColor;
+            const isActive =
+              cls.includes("active") ||
+              cls.includes("selected") ||
+              cls.includes("checked") ||
+              cls.includes("btn-success") ||
+              ariaPressed === "true";
+
+            return { isActive, cls: (el.className || "").substring(0, 100), bg };
+          }
+          return { isActive: false, cls: "", bg: "" };
+        }, t.time);
+      };
+
       try {
         await humanClick(page, t.x, t.y, { preMovesNear: true });
         console.log(`  [BOOK] ✅ HumanClick saat: ${t.time} (x:${Math.round(t.x)}, y:${Math.round(t.y)})`);
-        timeButtonResult = { clicked: true, time: t.time, isOrange: t.isOrange, method: "human_click" };
       } catch (mouseErr) {
+        usedMethod = "human_click_error";
         console.log(`  [BOOK] HumanClick saat hata: ${mouseErr.message}`);
       }
-      
+
       await delay(1500, 2500);
-      
-      // 2) Doğrulama — tıklama algılandı mı?
-      const timeVerify = await page.evaluate((targetTime) => {
-        const candidates = Array.from(document.querySelectorAll("a, button, span, div, li, label, td"));
-        let isActive = false;
-        for (const el of candidates) {
-          const text = (el.innerText || el.textContent || "").trim();
-          if (text === targetTime) {
-            const cls = (el.className || "").toLowerCase();
-            const bg = window.getComputedStyle(el).backgroundColor;
-            isActive = cls.includes("active") || cls.includes("selected") || cls.includes("checked");
-            return { isActive, cls: (el.className || "").substring(0, 80), bg };
-          }
-        }
-        return { isActive: false };
-      }, t.time);
-      
-      console.log(`  [BOOK] Saat doğrulama: ${JSON.stringify(timeVerify)}`);
-      
-      // 3) Seçilmediyse — __doPostBack ile dene
+      let timeVerify = await verifyTimeSelection();
+      console.log(`  [BOOK] Saat doğrulama-1: ${JSON.stringify(timeVerify)}`);
+
       if (!timeVerify.isActive && t.postbackTarget) {
+        usedMethod = "postback";
         console.log(`  [BOOK] Saat aktif değil, __doPostBack çağrılıyor: ${t.postbackTarget}`);
         await page.evaluate((target, arg) => {
           if (typeof window.__doPostBack === "function") {
             window.__doPostBack(target, arg);
           }
         }, t.postbackTarget, t.postbackArg || "");
-        timeButtonResult.method = "postback";
-        await delay(2000, 3000);
+        await delay(1500, 2500);
+        timeVerify = await verifyTimeSelection();
+        console.log(`  [BOOK] Saat doğrulama-2(postback): ${JSON.stringify(timeVerify)}`);
       }
-      
-      // 4) Element handle ile tıkla
+
       if (!timeVerify.isActive) {
+        usedMethod = "element_handle";
         console.log("  [BOOK] Saat aktif değil, element handle ile deneniyor...");
         try {
-          const timeElements = await page.$$("a, button, span, div, li, label, td");
+          const timeElements = await page.$$("button.getdatebtnhour, button.btn-warning, button, a, input[type='button'], input[type='submit']");
           for (const elHandle of timeElements) {
-            const elText = await page.evaluate(el => (el.innerText || el.textContent || "").trim(), elHandle);
-            if (elText === t.time) {
+            const meta = await page.evaluate(el => ({
+              text: (el.innerText || el.textContent || el.value || "").trim(),
+              cls: (el.className || "").toLowerCase(),
+            }), elHandle);
+            if (meta.text.includes(t.time) && (meta.cls.includes("getdatebtnhour") || meta.cls.includes("btn") || meta.cls.includes("warning"))) {
               await elHandle.click();
               console.log(`  [BOOK] ✅ Element handle click: ${t.time}`);
-              timeButtonResult.method = "element_handle";
               break;
             }
           }
@@ -3553,32 +3583,42 @@ async function bookEarliestAppointment(page, account) {
           console.log(`  [BOOK] Element handle hata: ${ehErr.message}`);
         }
         await delay(1000, 2000);
-        
-        // 5) Hala seçilmediyse — full event dispatch
+        timeVerify = await verifyTimeSelection();
+        console.log(`  [BOOK] Saat doğrulama-3(element): ${JSON.stringify(timeVerify)}`);
+      }
+
+      if (!timeVerify.isActive) {
+        usedMethod = "full_event_dispatch";
         await page.evaluate((targetTime) => {
-          const candidates = Array.from(document.querySelectorAll("a, button, span, div, li, label, td"));
-          for (const el of candidates) {
-            const text = (el.innerText || el.textContent || "").trim();
-            if (text === targetTime) {
-              // Tam olay zinciri: focus → pointer → mouse → click
-              el.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
-              el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
-              el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-              // ASP.NET: anchor href varsa doğrudan çalıştır
-              const href = el.getAttribute && el.getAttribute("href");
-              if (href && href.includes("__doPostBack")) {
-                try { eval(href.replace("javascript:", "")); } catch(e) {}
-              }
-              break;
+          const controls = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button']"));
+          for (const el of controls) {
+            const text = (el.innerText || el.textContent || el.value || "").trim();
+            if (!text.includes(targetTime)) continue;
+            el.dispatchEvent(new FocusEvent("focus", { bubbles: true }));
+            el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+            if (typeof el.click === "function") el.click();
+            const href = el.getAttribute && el.getAttribute("href");
+            if (href && href.includes("__doPostBack")) {
+              try { eval(href.replace("javascript:", "")); } catch(e) {}
             }
+            break;
           }
         }, t.time);
-        timeButtonResult.method = "full_event_dispatch";
         await delay(1000, 1500);
+        timeVerify = await verifyTimeSelection();
+        console.log(`  [BOOK] Saat doğrulama-4(dispatch): ${JSON.stringify(timeVerify)}`);
       }
+
+      timeButtonResult = {
+        clicked: !!timeVerify.isActive,
+        time: t.time,
+        isOrange: t.isOrange,
+        method: usedMethod,
+      };
     } else {
       // Fallback: select dropdown
       const selectResult = await page.evaluate(() => {
@@ -3595,7 +3635,7 @@ async function bookEarliestAppointment(page, account) {
       });
       timeButtonResult = selectResult;
     }
-    
+
     console.log(`  [BOOK] Saat seçimi sonuç: ${JSON.stringify(timeButtonResult)}`);
     await delay(2000, 3000);
 
