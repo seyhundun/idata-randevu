@@ -3724,9 +3724,16 @@ async function bookEarliestAppointment(page, account) {
             }
             const cls = (el.className || "").toLowerCase();
             if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("active")) isOrange = true;
+            
+            // ASP.NET postback
+            const href = el.getAttribute("href") || "";
+            let postbackTarget = null, postbackArg = null;
+            const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+            if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
+            
             const rect = el.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
-              timeButtons.push({ time: timeMatch[1], isOrange, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+              timeButtons.push({ time: timeMatch[1], isOrange, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, postbackTarget, postbackArg });
             }
           }
           const orangeButtons = timeButtons.filter(t => t.isOrange);
@@ -3740,9 +3747,20 @@ async function bookEarliestAppointment(page, account) {
         });
 
         if (retryTimeInfo.found) {
-          console.log(`  [BOOK] ⏰ Retry saat seçimi: ${retryTimeInfo.time}`);
+          console.log(`  [BOOK] ⏰ Retry saat seçimi: ${retryTimeInfo.time} (postback=${!!retryTimeInfo.postbackTarget})`);
           await humanClick(page, retryTimeInfo.x, retryTimeInfo.y, { preMovesNear: true });
           await delay(1500, 2500);
+          
+          // Postback fallback
+          if (retryTimeInfo.postbackTarget) {
+            await page.evaluate((target, arg) => {
+              if (typeof window.__doPostBack === "function") {
+                window.__doPostBack(target, arg);
+              }
+            }, retryTimeInfo.postbackTarget, retryTimeInfo.postbackArg || "");
+            console.log(`  [BOOK] ✅ Retry saat __doPostBack çağrıldı`);
+            await delay(1500, 2500);
+          }
         } else {
           console.log(`  [BOOK] ⚠️ Retry'da saat butonu bulunamadı`);
         }
