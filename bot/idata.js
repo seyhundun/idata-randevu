@@ -4115,6 +4115,9 @@ async function bookEarliestAppointment(page, account) {
         } catch (_) {}
         return { success: false, partial: true, error: "redirected_dashboard_after_selection" };
       }
+
+      // ===== Başarılı =====
+      if (pageState.success) {
         startAlarm();
         await idataLog("appt_booked", `🎉 ÖDEME BAŞARILI — RANDEVU ALINDI! | Hesap: ${account.email}`, ssPage);
         return { success: true, date: dateSelected?.day || "?" };
