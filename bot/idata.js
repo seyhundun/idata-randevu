@@ -11,6 +11,7 @@ const CONFIG = {
   API_URL: "https://ocrpzwrsyiprfuzsyivf.supabase.co/functions/v1/bot-api",
   API_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
   CAPTCHA_API_KEY: (process.env.CAPTCHA_API_KEY || process.env.TWOCAPTCHA_API_KEY || "").trim(),
+  OTP_EMAIL_FROM: (process.env.IDATA_OTP_FROM || "").trim().toLowerCase(), // örn: no-reply@idata.com.tr
   REGISTER_URL: "https://it-tr-appointment.idata.com.tr/tr/membership/register",
   LOGIN_URL: "https://it-tr-appointment.idata.com.tr/tr/membership/login",
   APPOINTMENT_URL: "https://it-tr-appointment.idata.com.tr/tr/membership/dashboard/application/availability",
@@ -1150,12 +1151,12 @@ async function selectDropdownOption(page, dropdownSelector, optionText) {
   }
 }
 
-// ==================== IMAP OTP READ (doğrudan Node.js) ====================
+// ==================== IMAP OTP READ (son mail + gönderen filtresi) ====================
 async function tryImapOtp(accountId) {
   try {
     const { ImapFlow } = require("imapflow");
     const fetch = (await import("node-fetch")).default;
-    
+
     // Hesap bilgilerini al
     const res = await fetch(
       `https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/idata_accounts?id=eq.${accountId}&select=email,imap_host,imap_password`,
@@ -1166,13 +1167,22 @@ async function tryImapOtp(accountId) {
         },
       }
     );
+
     const accounts = await res.json();
     if (!accounts?.length || !accounts[0].imap_password) return null;
-    
+
     const account = accounts[0];
     const host = account.imap_host || "imap.gmail.com";
+    const allowedFrom = (CONFIG.OTP_EMAIL_FROM || "")
+      .split(",")
+      .map((x) => x.trim().toLowerCase())
+      .filter(Boolean);
+
     console.log(`  [IMAP] ${account.email} → ${host} bağlanıyor...`);
-    
+    if (allowedFrom.length) {
+      console.log(`  [IMAP] Gönderen filtresi: ${allowedFrom.join(", ")}`);
+    }
+
     const client = new ImapFlow({
       host,
       port: 993,
@@ -1182,63 +1192,94 @@ async function tryImapOtp(accountId) {
       greetingTimeout: 10000,
       socketTimeout: 15000,
     });
-    
+
     await client.connect();
-    
     const lock = await client.getMailboxLock("INBOX");
+
     try {
       // Son 1 gündeki okunmamış mailleri ara
       const since = new Date();
       since.setDate(since.getDate() - 1);
-      
+
       const messages = await client.search({ seen: false, since }, { uid: true });
       if (!messages.length) {
-        console.log(`  [IMAP] Okunmamış mail yok`);
+        console.log("  [IMAP] Okunmamış mail yok");
         await lock.release();
         await client.logout();
         return null;
       }
-      
-      // Son 5 maili kontrol et
-      const lastUids = messages.slice(-5).reverse();
-      
+
+      // En yeni maillerden geriye doğru tara (önce son gelen mail)
+      const lastUids = messages.slice(-10).reverse();
+
       for (const uid of lastUids) {
-        const msg = await client.fetchOne(uid, { source: true }, { uid: true });
-        const rawText = msg.source.toString();
-        const lower = rawText.toLowerCase();
-        
-        // VFS/iDATA OTP maili mi?
-        const isOtp = lower.includes("vfs") || lower.includes("idata") || 
-                      lower.includes("doğrulama") || lower.includes("verification") ||
-                      lower.includes("otp") || lower.includes("code");
-        
-        if (isOtp) {
-          // OTP kodunu çıkar (4-8 haneli)
-          const patterns = [
-            /(?:code|kod|otp|doğrulama|verification)[:\s]*(\d{4,8})/i,
-            /(\d{4,8})\s*(?:is your|doğrulama|verification|code|kod)/i,
-            /\b(\d{6})\b/,
-            /\b(\d{4})\b/,
-          ];
-          
-          for (const pattern of patterns) {
-            const match = rawText.match(pattern);
-            if (match) {
-              console.log(`  [IMAP] ✅ OTP bulundu: ${match[1]}`);
-              await lock.release();
-              await client.logout();
-              return match[1];
-            }
+        const msg = await client.fetchOne(
+          uid,
+          { source: true, envelope: true, internalDate: true },
+          { uid: true }
+        );
+
+        const fromList = (msg?.envelope?.from || [])
+          .map((x) => (x?.address || "").toLowerCase())
+          .filter(Boolean);
+        const fromText = fromList.join(", ");
+        const subject = msg?.envelope?.subject || "";
+
+        // Gönderen filtresi varsa sadece o adresten gelenleri işle
+        if (allowedFrom.length > 0) {
+          const senderMatched = fromList.some((addr) =>
+            allowedFrom.some((allowed) => addr.includes(allowed))
+          );
+          if (!senderMatched) {
+            console.log(`  [IMAP] UID ${uid} atlandı (from: ${fromText || "?"})`);
+            continue;
           }
         }
+
+        const rawText = (msg?.source ? msg.source.toString("utf8") : "").replace(/\r/g, "");
+
+        // Konuşma geçmişindeki eski kodları elemek için sadece üst (en yeni) bölüm
+        const mainBlock = rawText
+          .split(/\n(?:On .+ wrote:|-----Original Message-----|From:\s.+\nSent:\s.+)/i)[0]
+          .slice(0, 5000);
+
+        const strictPatterns = [
+          /e-?posta doğrulama kodu[^\d]{0,20}(\d{6})/i,
+          /doğrulama kodu[^\d]{0,20}(\d{6})/i,
+          /verification code[^\d]{0,20}(\d{6})/i,
+          /one[-\s]?time password[^\d]{0,20}(\d{6})/i,
+          /otp[^\d]{0,20}(\d{6})/i,
+        ];
+
+        let otp = null;
+        for (const pattern of strictPatterns) {
+          const match = mainBlock.match(pattern);
+          if (match?.[1]) {
+            otp = match[1];
+            break;
+          }
+        }
+
+        // Fallback: üst blokta geçen ilk 6 haneli kod
+        if (!otp) {
+          const fallback = mainBlock.match(/\b(\d{6})\b/);
+          if (fallback?.[1]) otp = fallback[1];
+        }
+
+        if (otp) {
+          console.log(`  [IMAP] ✅ OTP bulundu: ${otp} | from: ${fromText || "?"} | subject: ${subject}`);
+          await lock.release();
+          await client.logout();
+          return otp;
+        }
       }
-      
+
       await lock.release();
     } catch (e) {
-      lock.release();
+      await lock.release();
       throw e;
     }
-    
+
     await client.logout();
     return null;
   } catch (err) {
