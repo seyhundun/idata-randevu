@@ -3072,21 +3072,39 @@ async function mainLoop() {
                 await idataLog("appt_found", `🎉 RANDEVU BULUNDU! | Hesap: ${account.email}`, apptResult.screenshot);
                 startAlarm();
                 
-                console.log("  ⚡ Randevu bulundu! Hızlı kontrol moduna geçildi.");
-                let fastCheckCount = 0;
-                while (fastCheckCount < 20) {
-                  await delay(15000, 20000);
-                  fastCheckCount++;
-                  const recheck = await checkAppointments(page, account);
-                  if (recheck.found) {
-                    await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! (${fastCheckCount}) | Hesap: ${account.email}`, recheck.screenshot);
-                  } else {
-                    await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
-                    stopAlarm();
-                    break;
+                // Otomatik randevu alma — en erken tarihi seç ve ilerle
+                console.log("  ⚡ Randevu bulundu! Otomatik randevu alma başlıyor...");
+                const bookResult = await bookEarliestAppointment(page, account);
+                
+                if (bookResult.success) {
+                  console.log(`  🎉 RANDEVU ALINDI! Tarih: ${bookResult.date}`);
+                  await idataLog("appt_booked", `🎉 RANDEVU BAŞARIYLA ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`);
+                  // Alarm çalmaya devam etsin, kullanıcı fark etsin
+                } else {
+                  console.log(`  ⚠️ Otomatik alma ${bookResult.partial ? "kısmen ilerledi" : "başarısız"}: ${bookResult.error || "Bilinmeyen"}`);
+                  // Randevu hala mevcut mu kontrol et
+                  let fastCheckCount = 0;
+                  while (fastCheckCount < 10) {
+                    await delay(15000, 20000);
+                    fastCheckCount++;
+                    const recheck = await checkAppointments(page, account);
+                    if (recheck.found) {
+                      await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! (${fastCheckCount}) | Hesap: ${account.email}`, recheck.screenshot);
+                      // Tekrar dene
+                      const retryBook = await bookEarliestAppointment(page, account);
+                      if (retryBook.success) {
+                        console.log(`  🎉 RANDEVU ALINDI (retry)! Tarih: ${retryBook.date}`);
+                        await idataLog("appt_booked", `🎉 RANDEVU ALINDI (retry)! | Tarih: ${retryBook.date} | Hesap: ${account.email}`);
+                        break;
+                      }
+                    } else {
+                      await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
+                      stopAlarm();
+                      break;
+                    }
                   }
+                  if (fastCheckCount >= 10) stopAlarm();
                 }
-                if (fastCheckCount >= 20) stopAlarm();
               } else {
                 stopAlarm();
                 await idataLog("appt_none", `Randevu yok | ${apptResult.message || ""} | Hesap: ${account.email}`, apptResult.screenshot);
