@@ -3182,7 +3182,8 @@ async function bookEarliestAppointment(page, account) {
         for (const d of tds) {
           const text = (d.innerText || d.textContent || "").trim();
           if (!/^\d{1,2}$/.test(text)) continue;
-          if (d.classList.contains("disabled") || d.classList.contains("off") || d.classList.contains("old")) continue;
+          // iDATA uses disabled-day class with pointer-events:none
+          if (d.classList.contains("disabled") || d.classList.contains("disabled-day") || d.classList.contains("off") || d.classList.contains("old")) continue;
 
           const dayNum = parseInt(text);
           const bgColor = window.getComputedStyle(d).backgroundColor;
@@ -3197,6 +3198,9 @@ async function bookEarliestAppointment(page, account) {
             isYellow = r > 200 && g > 150 && b < 100;
           }
 
+          // iDATA specific: enabled-day = green, disabled-day = red
+          if (d.classList.contains("enabled-day")) isGreen = true;
+          if (d.classList.contains("disabled-day")) { isRed = true; isGreen = false; }
           if (d.classList.contains("bg-success") || d.classList.contains("success")) isGreen = true;
           if (d.classList.contains("bg-danger") || d.classList.contains("danger")) isRed = true;
           if (d.classList.contains("bg-warning") || d.classList.contains("warning") || d.classList.contains("today") || d.classList.contains("active")) isYellow = true;
@@ -3296,7 +3300,11 @@ async function bookEarliestAppointment(page, account) {
             }
           }
           // Date input değeri gerçekten seçilen günü yansıtıyor mu kontrol et
-          const dateInputs = document.querySelectorAll("input[data-provide='datepicker'], input.datepicker, input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i]");
+          // iDATA uses .calendarinput and .flightDate classes
+          const dateInputs = document.querySelectorAll(
+            "input[data-provide='datepicker'], input.datepicker, input.calendarinput, input.flightDate, " +
+            "input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i], input[placeholder*='tarih' i]"
+          );
           for (const inp of dateInputs) {
             const v = (inp.value || "").trim();
             if (!v) continue;
@@ -3360,24 +3368,32 @@ async function bookEarliestAppointment(page, account) {
         console.log("  [BOOK] Tarih aktif değil, element handle + jQuery datepicker ile deneniyor...");
         try {
           // Yöntem 1: element handle ile td tıklama
-          const tdElements = await page.$$("td.day:not(.disabled):not(.old):not(.new), td:not(.disabled):not(.old)");
+          // Yöntem 1: element handle ile td.enabled-day tıklama (iDATA specific)
+          const tdElements = await page.$$("td.enabled-day, td.day:not(.disabled):not(.disabled-day):not(.old):not(.new), td:not(.disabled):not(.disabled-day):not(.old)");
+          const greenPool = [];
           for (const elHandle of tdElements) {
             const elInfo = await page.evaluate(el => {
               const text = (el.innerText || el.textContent || "").trim();
               const bgColor = window.getComputedStyle(el).backgroundColor;
+              const cls = (el.className || "").toLowerCase();
               const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-              let isGreen = false;
-              if (rgbMatch) {
+              let isGreen = cls.includes("enabled-day");
+              if (!isGreen && rgbMatch) {
                 const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
                 isGreen = g > 100 && g > r * 1.3 && g > b * 1.3;
               }
-              return { text, isGreen, bgColor };
+              return { text, isGreen, bgColor, day: parseInt(text) };
             }, elHandle);
-            if (parseInt(elInfo.text) === dateInfo.day && elInfo.isGreen) {
-              await elHandle.click();
-              console.log(`  [BOOK] ✅ Element handle td tarih: Gün ${dateInfo.day}`);
-              break;
+            if (elInfo.isGreen && !isNaN(elInfo.day)) {
+              greenPool.push({ handle: elHandle, ...elInfo });
             }
+          }
+          // İkinci yeşil günü seç (pool[1]), yoksa ilki
+          greenPool.sort((a, b) => a.day - b.day);
+          const targetGreen = greenPool.find(g => g.day === dateInfo.day) || (greenPool.length > 1 ? greenPool[1] : greenPool[0]);
+          if (targetGreen) {
+            await targetGreen.handle.click();
+            console.log(`  [BOOK] ✅ Element handle td.enabled-day: Gün ${targetGreen.day}`);
           }
 
           await delay(1000, 1500);
@@ -3387,11 +3403,14 @@ async function bookEarliestAppointment(page, account) {
           if (!dateVerify.isActive) {
             console.log("  [BOOK] jQuery datepicker event tetikleniyor...");
             await page.evaluate((dayNum) => {
-              // Bootstrap datepicker: td.day elemanına tıklama simüle et
-              const allTds = document.querySelectorAll("td.day, td");
+              // iDATA: td.enabled-day veya yeşil td elemanına tıklama simüle et
+              const allTds = document.querySelectorAll("td.enabled-day, td.day, td");
               for (const td of allTds) {
                 const text = (td.innerText || td.textContent || "").trim();
-                if (parseInt(text) === dayNum) {
+                if (parseInt(text) !== dayNum) continue;
+                const cls = (td.className || "").toLowerCase();
+                const isEnabledDay = cls.includes("enabled-day");
+                if (!isEnabledDay) {
                   const bgColor = window.getComputedStyle(td).backgroundColor;
                   const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
                   let isGreen = false;
@@ -3400,18 +3419,28 @@ async function bookEarliestAppointment(page, account) {
                     isGreen = g > 100 && g > r * 1.3 && g > b * 1.3;
                   }
                   if (!isGreen) continue;
-
-                  // Focus, mousedown, mouseup, click tam sırası
-                  ["mousedown", "mouseup", "click"].forEach(evt => {
-                    td.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                  });
-
-                  // jQuery trigger dene
-                  if (typeof window.jQuery !== "undefined") {
-                    window.jQuery(td).trigger("click");
-                  }
-                  return true;
                 }
+
+                // Focus, mousedown, mouseup, click tam sırası
+                ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(evt => {
+                  td.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                });
+
+                // Inner link varsa onu da tıkla
+                const innerA = td.querySelector("a");
+                if (innerA) {
+                  innerA.click();
+                  const href = innerA.getAttribute("href") || "";
+                  if (href.includes("__doPostBack")) {
+                    try { eval(href.replace("javascript:", "")); } catch(e) {}
+                  }
+                }
+
+                // jQuery trigger dene
+                if (typeof window.jQuery !== "undefined") {
+                  window.jQuery(td).trigger("click");
+                }
+                return true;
               }
               return false;
             }, dateInfo.day);
@@ -3430,7 +3459,7 @@ async function bookEarliestAppointment(page, account) {
             
             // Tarih formatını bul ve input'a yaz
             await page.evaluate((dayNum) => {
-              const dateInputs = document.querySelectorAll("input[data-provide='datepicker'], input.datepicker, input.hasDatepicker, input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i], input[placeholder*='tarih' i]");
+              const dateInputs = document.querySelectorAll("input[data-provide='datepicker'], input.datepicker, input.calendarinput, input.flightDate, input.hasDatepicker, input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i], input[placeholder*='tarih' i]");
               for (const inp of dateInputs) {
                 const rect = inp.getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0) {
@@ -3524,7 +3553,11 @@ async function bookEarliestAppointment(page, account) {
 
       await page.evaluate((val) => {
         const inputs = Array.from(document.querySelectorAll("input"));
+        // iDATA: calendarinput, flightDate class'larını öncelikle hedefle
         const dateInput = inputs.find(inp => {
+          const cls = (inp.className || "").toLowerCase();
+          return cls.includes("calendarinput") || cls.includes("flightdate");
+        }) || inputs.find(inp => {
           const ph = (inp.placeholder || "").toLowerCase();
           const nm = (inp.name || "").toLowerCase();
           return ph.includes("randevu") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
