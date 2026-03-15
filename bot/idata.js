@@ -4505,24 +4505,56 @@ async function bookEarliestAppointment(page, account) {
 
         await delay(500, 1000);
 
-        // ===== TAMAM'dan sonra yeniden tarih seç (sadece yeşil + en erken) =====
-        const retryDateInfo = await page.evaluate((preferredDay) => {
+        // ===== TAMAM'dan sonra yeniden tarih seç (yalnızca ilk ekrandaki açık tarihler) =====
+        const retryTargetDate = announcedAppointmentDates[warningRetry % Math.max(announcedAppointmentDates.length, 1)] || preferredAppointmentDate || null;
+        const retryDateInfo = await page.evaluate((targetNormalized, allowedDates) => {
+          const allowedSet = new Set((allowedDates || []).filter(Boolean));
+          const monthMap = {
+            january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+            ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5, haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9, ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12,
+          };
+          const parseMonthYear = (text) => {
+            const raw = String(text || "").trim().toLowerCase();
+            const yearMatch = raw.match(/(20\d{2})/);
+            let month = null;
+            for (const [name, num] of Object.entries(monthMap)) {
+              if (raw.includes(name)) {
+                month = num;
+                break;
+              }
+            }
+            return { month, year: yearMatch ? parseInt(yearMatch[1], 10) : null };
+          };
+
           const calContainers = document.querySelectorAll(
             ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, " +
             ".datepicker-days, .flatpickr-calendar, .ui-datepicker, " +
             "[class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed"
           );
-          let allDays = [];
+          const allDays = [];
           for (const cal of calContainers) {
             const style = window.getComputedStyle(cal);
             if (style.display === "none" || style.visibility === "hidden") continue;
+
+            const headerNodes = Array.from(cal.querySelectorAll(".datepicker-switch, .picker-switch, .datepicker th.switch, .ui-datepicker-title, caption, th"));
+            let displayedMonth = null;
+            let displayedYear = null;
+            for (const node of headerNodes) {
+              const parsed = parseMonthYear(node.innerText || node.textContent || "");
+              if (parsed.month && parsed.year) {
+                displayedMonth = parsed.month;
+                displayedYear = parsed.year;
+                break;
+              }
+            }
+
             const tds = cal.querySelectorAll("td");
             for (const d of tds) {
               const text = (d.innerText || d.textContent || "").trim();
               if (!/^\d{1,2}$/.test(text)) continue;
               const childFlagEl = d.querySelector("a, span, div");
               const classBlob = `${d.className || ""} ${childFlagEl?.className || ""}`.toLowerCase();
-              if (d.classList.contains("disabled") || d.classList.contains("off") || d.classList.contains("old") || classBlob.includes("disabled-day")) continue;
+              if (classBlob.includes("disabled") || classBlob.includes("off") || classBlob.includes("old") || classBlob.includes("new") || classBlob.includes("disabled-day")) continue;
 
               const dayNum = parseInt(text, 10);
               const tdBg = window.getComputedStyle(d).backgroundColor;
@@ -4531,14 +4563,22 @@ async function bookEarliestAppointment(page, account) {
               const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
               let isGreen = false;
               let isYellow = false;
+              let isRed = false;
               if (rgbMatch) {
                 const r = parseInt(rgbMatch[1], 10), g = parseInt(rgbMatch[2], 10), b = parseInt(rgbMatch[3], 10);
                 isGreen = g > 100 && g > r * 1.2 && g > b * 1.2;
                 isYellow = r > 200 && g > 150 && b < 120;
+                isRed = r > 150 && r > g * 1.4 && r > b * 1.4;
               }
               if (d.classList.contains("bg-success") || d.classList.contains("success") || classBlob.includes("enabled-day") || classBlob.includes("bg-success")) isGreen = true;
               if (d.classList.contains("bg-warning") || d.classList.contains("warning") || d.classList.contains("today") || d.classList.contains("active") || classBlob.includes("bg-warning") || classBlob.includes("warning") || classBlob.includes("active")) isYellow = true;
-              if (!isGreen || isYellow) continue;
+              if (d.classList.contains("bg-danger") || d.classList.contains("danger") || classBlob.includes("bg-danger") || classBlob.includes("danger")) isRed = true;
+              if (!isGreen || isYellow || isRed) continue;
+
+              const normalizedDate = displayedMonth && displayedYear
+                ? `${displayedYear}-${String(displayedMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`
+                : null;
+              if (allowedSet.size > 0 && (!normalizedDate || !allowedSet.has(normalizedDate))) continue;
 
               const innerLink = d.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
               const postbackHref = innerLink ? (innerLink.getAttribute("href") || "") : "";
@@ -4549,17 +4589,17 @@ async function bookEarliestAppointment(page, account) {
               const clickableEl = innerLink || d;
               const rect = clickableEl.getBoundingClientRect();
               if (rect.width > 0 && rect.height > 0) {
-                allDays.push({ day: dayNum, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, postbackTarget, postbackArg, hasLink: !!innerLink });
+                allDays.push({ day: dayNum, normalizedDate, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, postbackTarget, postbackArg, hasLink: !!innerLink });
               }
             }
           }
-          const greenDays = allDays.sort((a, b) => a.day - b.day);
-          if (greenDays.length > 0) {
-            const target = greenDays.find(d => d.day === preferredDay) || greenDays[0];
-            return { found: true, day: target.day, x: target.x, y: target.y, greenCount: greenDays.length, postbackTarget: target.postbackTarget, postbackArg: target.postbackArg, hasLink: target.hasLink };
+          allDays.sort((a, b) => (a.normalizedDate || "").localeCompare(b.normalizedDate || "") || a.day - b.day);
+          if (allDays.length > 0) {
+            const target = allDays.find((d) => d.normalizedDate === targetNormalized) || allDays[0];
+            return { found: true, day: target.day, normalizedDate: target.normalizedDate, x: target.x, y: target.y, greenCount: allDays.length, postbackTarget: target.postbackTarget, postbackArg: target.postbackArg, hasLink: target.hasLink };
           }
           return { found: false };
-        }, targetDay);
+        }, retryTargetDate?.normalized ?? null, announcedAppointmentDateKeys);
 
         if (retryDateInfo.found) {
           console.log(`  [BOOK] 📅 Retry tarih seçimi: Gün ${retryDateInfo.day} (${retryDateInfo.greenCount} yeşil, postback=${!!retryDateInfo.postbackTarget})`);
