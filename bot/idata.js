@@ -3439,11 +3439,13 @@ async function bookEarliestAppointment(page, account) {
               allDays.push({ el: d, day: dayNum, isGreen, bgColor });
             }
           }
-          // Denenmiş günleri atla
+          // Denenmiş günleri atla, bir sonraki yeşil günü seç
           const greenDays = allDays.filter(d => d.isGreen && !skipDays.includes(d.day)).sort((a, b) => a.day - b.day);
           const pool = greenDays.length > 0 ? greenDays : allDays.filter(d => !skipDays.includes(d.day)).sort((a, b) => a.day - b.day);
           if (pool.length > 0) {
-            pool[0].el.click();
+            // Mümkünse 2. günü seç (ilk yeşili atla)
+            const pick = pool.length > 1 ? pool[1] : pool[0];
+            pick.el.click();
             return { selected: true, day: pool[0].day, isGreen: pool[0].isGreen, remaining: pool.length - 1 };
           }
           return { selected: false, remaining: 0 };
