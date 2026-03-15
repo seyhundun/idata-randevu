@@ -2547,14 +2547,25 @@ async function checkAppointments(page, account) {
       }
 
       // === KESİN RANDEVU VAR === (çok spesifik kontroller)
-      // Sadece gerçek tarih seçim arayüzü görünüyorsa "found" de
       const hasDatePicker = !!document.querySelector('input[type="date"], .datepicker-days, .flatpickr-calendar');
       const hasAvailableSlots = lower.includes("müsait randevu tarihleri") || 
                                   lower.includes("aşağıdaki tarihlerden") ||
-                                  lower.includes("randevu tarihini seçiniz");
+                                  lower.includes("randevu tarihini seçiniz") ||
+                                  lower.includes("en yakın randevu tarihleri");
       
-      if (hasDatePicker || hasAvailableSlots) {
-        return { found: true, status: "appointment_available", text: body.substring(0, 500) };
+      // Tarih input'larından tarihleri çek
+      const dateInputs = Array.from(document.querySelectorAll('input[type="date"], input[type="text"]'));
+      const dates = [];
+      for (const inp of dateInputs) {
+        const val = inp.value || "";
+        // DD-MM-YYYY or DD.MM.YYYY or YYYY-MM-DD formatları
+        if (/\d{2}[-/.]\d{2}[-/.]\d{4}/.test(val) || /\d{4}[-/.]\d{2}[-/.]\d{2}/.test(val)) {
+          dates.push(val);
+        }
+      }
+      
+      if (hasDatePicker || hasAvailableSlots || dates.length > 0) {
+        return { found: true, status: "appointment_available", text: body.substring(0, 500), dates };
       }
 
       // === FORM HENÜZ DOLDURULMADI / SONUÇ BELİRSİZ ===
@@ -2583,6 +2594,250 @@ async function checkAppointments(page, account) {
   } catch (err) {
     console.error(`  [CHECK] Hata: ${err.message}`);
     return { found: false, error: err.message };
+  }
+}
+
+// ==================== AUTO BOOKING ====================
+async function bookEarliestAppointment(page, account) {
+  try {
+    console.log("  [BOOK] 🎯 En erken tarih seçiliyor...");
+    
+    // 1) Tarihleri bul ve en erken olanı seç
+    const dateResult = await page.evaluate(() => {
+      const allInputs = Array.from(document.querySelectorAll('input'));
+      const dateInputs = allInputs.filter(inp => {
+        const val = inp.value || "";
+        return /\d{2}[-\/\.]\d{2}[-\/\.]\d{4}/.test(val) || /\d{4}[-\/\.]\d{2}[-\/\.]\d{2}/.test(val);
+      });
+
+      if (dateInputs.length === 0) {
+        // Tarih link/buton olarak da olabilir
+        const dateLinks = Array.from(document.querySelectorAll('a, button, td, div, span'));
+        const dateCandidates = dateLinks.filter(el => {
+          const txt = (el.innerText || el.textContent || "").trim();
+          return /^\d{2}[-\/\.]\d{2}[-\/\.]\d{4}$/.test(txt);
+        });
+        if (dateCandidates.length > 0) {
+          dateCandidates[0].click();
+          return { clicked: true, date: dateCandidates[0].innerText.trim(), method: "link_click", allDates: dateCandidates.map(d => d.innerText.trim()) };
+        }
+        return { clicked: false, error: "Tarih elementi bulunamadı" };
+      }
+
+      // Tarihleri parse et, en erken olanı bul
+      const parsedDates = dateInputs.map((inp, idx) => {
+        const val = inp.value.trim();
+        let dateObj;
+        const dmy = val.match(/(\d{2})[-\/\.](\d{2})[-\/\.](\d{4})/);
+        if (dmy) dateObj = new Date(parseInt(dmy[3]), parseInt(dmy[2]) - 1, parseInt(dmy[1]));
+        const ymd = val.match(/(\d{4})[-\/\.](\d{2})[-\/\.](\d{2})/);
+        if (!dateObj && ymd) dateObj = new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
+        return { idx, val, dateObj, element: inp };
+      }).filter(d => d.dateObj && !isNaN(d.dateObj.getTime()));
+
+      if (parsedDates.length === 0) {
+        dateInputs[0].click();
+        dateInputs[0].focus();
+        return { clicked: true, date: dateInputs[0].value, method: "first_input_click", allDates: dateInputs.map(i => i.value) };
+      }
+
+      parsedDates.sort((a, b) => a.dateObj - b.dateObj);
+      const earliest = parsedDates[0];
+      earliest.element.click();
+      earliest.element.focus();
+      
+      // Yakınındaki radio/checkbox varsa tıkla
+      const parent = earliest.element.closest('td, div, label, li');
+      if (parent) {
+        const radio = parent.querySelector('input[type="radio"], input[type="checkbox"]');
+        if (radio) {
+          radio.checked = true;
+          radio.click();
+          radio.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+
+      return { clicked: true, date: earliest.val, allDates: parsedDates.map(d => d.val), method: "earliest_date_selected" };
+    });
+
+    console.log(`  [BOOK] Tarih: ${JSON.stringify(dateResult)}`);
+    
+    if (!dateResult.clicked) {
+      console.log(`  [BOOK] ❌ Tarih seçilemedi: ${dateResult.error}`);
+      return { success: false, error: dateResult.error };
+    }
+
+    const ss1 = await takeScreenshotBase64(page);
+    await idataLog("appt_date_selected", `📅 Tarih seçildi: ${dateResult.date} | Tüm tarihler: ${(dateResult.allDates || []).join(", ")} | Hesap: ${account.email}`, ss1);
+    await delay(1500, 2500);
+
+    // 2) "İLERİ" butonuna tıkla
+    console.log("  [BOOK] İLERİ butonuna tıklanıyor...");
+    const ileriClicked = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'));
+      const ileriBtn = candidates.find(el => {
+        const txt = (el.innerText || el.value || el.textContent || "").trim().toUpperCase();
+        return txt === "İLERİ" || txt === "ILERI" || txt === "DEVAM" || txt === "NEXT" || txt === "DEVAM ET";
+      });
+      if (ileriBtn) {
+        ileriBtn.click();
+        return { clicked: true, text: (ileriBtn.innerText || ileriBtn.value || "").trim() };
+      }
+      // Fallback: btn-success class
+      const greenBtns = Array.from(document.querySelectorAll('.btn-success, .btn-primary'));
+      for (const btn of greenBtns) {
+        const txt = (btn.innerText || btn.value || "").trim();
+        if (txt.length > 0) {
+          btn.click();
+          return { clicked: true, text: txt };
+        }
+      }
+      return { clicked: false };
+    });
+
+    if (!ileriClicked.clicked) {
+      const ss2 = await takeScreenshotBase64(page);
+      await idataLog("appt_error", `İLERİ butonu bulunamadı | Hesap: ${account.email}`, ss2);
+      return { success: false, error: "İLERİ butonu bulunamadı" };
+    }
+
+    console.log(`  [BOOK] ✅ İLERİ tıklandı: ${ileriClicked.text}`);
+    await delay(3000, 5000);
+
+    // 3) Popup kontrolü — uyarı varsa kapat
+    await page.evaluate(() => {
+      const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button');
+      for (const btn of closeButtons) {
+        const txt = (btn.innerText || "").trim().toUpperCase();
+        if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT" || txt === "EVET") {
+          btn.click();
+          break;
+        }
+      }
+    });
+    await delay(2000, 3000);
+
+    // 4) Sonraki sayfanın ekran görüntüsünü al ve logla
+    const ss3 = await takeScreenshotBase64(page);
+    const nextPageState = await page.evaluate(() => {
+      const body = (document.body?.innerText || "");
+      const lower = body.toLowerCase();
+      return {
+        url: window.location.href,
+        bodyPreview: body.substring(0, 1500),
+        hasConfirmButton: !!Array.from(document.querySelectorAll('a, button, input')).find(el => {
+          const txt = (el.innerText || el.value || "").trim().toUpperCase();
+          return txt.includes("ONAYLA") || txt.includes("CONFIRM") || txt.includes("TAMAMLA") || txt.includes("KAYDET");
+        }),
+        hasIleriButton: !!Array.from(document.querySelectorAll('a, button, input')).find(el => {
+          const txt = (el.innerText || el.value || "").trim().toUpperCase();
+          return txt === "İLERİ" || txt === "ILERI";
+        }),
+        hasError: lower.includes("hata") || lower.includes("error"),
+        success: lower.includes("başarılı") || lower.includes("randevunuz") || lower.includes("onaylandı") || lower.includes("tamamlandı"),
+      };
+    });
+
+    await idataLog("appt_next_page", `Sonraki sayfa | URL: ${nextPageState.url} | Onay: ${nextPageState.hasConfirmButton} | İleri: ${nextPageState.hasIleriButton} | Hesap: ${account.email}\n${nextPageState.bodyPreview.substring(0, 500)}`, ss3);
+
+    if (nextPageState.success) {
+      startAlarm();
+      await idataLog("appt_booked", `🎉 RANDEVU ALINDI! | Tarih: ${dateResult.date} | Hesap: ${account.email}`, ss3);
+      return { success: true, date: dateResult.date };
+    }
+
+    // Eğer başka bir İLERİ varsa onu da tıkla
+    if (nextPageState.hasIleriButton) {
+      console.log("  [BOOK] 🔄 Bir sonraki İLERİ butonuna tıklanıyor...");
+      await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('a, button, input'));
+        const btn = candidates.find(el => {
+          const txt = (el.innerText || el.value || "").trim().toUpperCase();
+          return txt === "İLERİ" || txt === "ILERI";
+        });
+        if (btn) btn.click();
+      });
+      await delay(3000, 5000);
+
+      // Popup kapat
+      await page.evaluate(() => {
+        const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, button');
+        for (const btn of closeButtons) {
+          const txt = (btn.innerText || "").trim().toUpperCase();
+          if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT" || txt === "EVET") { btn.click(); break; }
+        }
+      });
+      await delay(2000, 3000);
+
+      const ss4 = await takeScreenshotBase64(page);
+      const page2State = await page.evaluate(() => {
+        const body = (document.body?.innerText || "");
+        const lower = body.toLowerCase();
+        return {
+          url: window.location.href,
+          bodyPreview: body.substring(0, 1500),
+          hasConfirmButton: !!Array.from(document.querySelectorAll('a, button, input')).find(el => {
+            const txt = (el.innerText || el.value || "").trim().toUpperCase();
+            return txt.includes("ONAYLA") || txt.includes("CONFIRM") || txt.includes("TAMAMLA");
+          }),
+          success: lower.includes("başarılı") || lower.includes("randevunuz") || lower.includes("onaylandı"),
+        };
+      });
+
+      await idataLog("appt_page2", `Sayfa 2 | URL: ${page2State.url} | Onay: ${page2State.hasConfirmButton} | Hesap: ${account.email}\n${page2State.bodyPreview.substring(0, 500)}`, ss4);
+
+      if (page2State.success) {
+        startAlarm();
+        await idataLog("appt_booked", `🎉 RANDEVU ALINDI! | Tarih: ${dateResult.date} | Hesap: ${account.email}`, ss4);
+        return { success: true, date: dateResult.date };
+      }
+
+      // Onay butonu varsa tıkla
+      if (page2State.hasConfirmButton) {
+        console.log("  [BOOK] 🟢 Onay butonu tıklanıyor...");
+        await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, input'));
+          const btn = candidates.find(el => {
+            const txt = (el.innerText || el.value || "").trim().toUpperCase();
+            return txt.includes("ONAYLA") || txt.includes("CONFIRM") || txt.includes("TAMAMLA");
+          });
+          if (btn) btn.click();
+        });
+        await delay(3000, 5000);
+        
+        const ssFinal = await takeScreenshotBase64(page);
+        await idataLog("appt_confirm_result", `Onay sonrası | Hesap: ${account.email}`, ssFinal);
+        startAlarm();
+        return { success: true, date: dateResult.date };
+      }
+    }
+
+    // Onay butonu varsa tıkla
+    if (nextPageState.hasConfirmButton) {
+      console.log("  [BOOK] 🟢 Onay butonu tıklanıyor...");
+      await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll('a, button, input'));
+        const btn = candidates.find(el => {
+          const txt = (el.innerText || el.value || "").trim().toUpperCase();
+          return txt.includes("ONAYLA") || txt.includes("CONFIRM") || txt.includes("TAMAMLA");
+        });
+        if (btn) btn.click();
+      });
+      await delay(3000, 5000);
+      
+      const ssFinal = await takeScreenshotBase64(page);
+      await idataLog("appt_confirm_result", `Onay sonrası | Hesap: ${account.email}`, ssFinal);
+      startAlarm();
+      return { success: true, date: dateResult.date };
+    }
+
+    return { success: false, partial: true, date: dateResult.date, pageState: nextPageState };
+
+  } catch (err) {
+    console.error(`  [BOOK] Hata: ${err.message}`);
+    const ssErr = await takeScreenshotBase64(page);
+    await idataLog("appt_book_error", `Randevu alma hatası: ${err.message} | Hesap: ${account.email}`, ssErr);
+    return { success: false, error: err.message };
   }
 }
 
@@ -2817,21 +3072,39 @@ async function mainLoop() {
                 await idataLog("appt_found", `🎉 RANDEVU BULUNDU! | Hesap: ${account.email}`, apptResult.screenshot);
                 startAlarm();
                 
-                console.log("  ⚡ Randevu bulundu! Hızlı kontrol moduna geçildi.");
-                let fastCheckCount = 0;
-                while (fastCheckCount < 20) {
-                  await delay(15000, 20000);
-                  fastCheckCount++;
-                  const recheck = await checkAppointments(page, account);
-                  if (recheck.found) {
-                    await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! (${fastCheckCount}) | Hesap: ${account.email}`, recheck.screenshot);
-                  } else {
-                    await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
-                    stopAlarm();
-                    break;
+                // Otomatik randevu alma — en erken tarihi seç ve ilerle
+                console.log("  ⚡ Randevu bulundu! Otomatik randevu alma başlıyor...");
+                const bookResult = await bookEarliestAppointment(page, account);
+                
+                if (bookResult.success) {
+                  console.log(`  🎉 RANDEVU ALINDI! Tarih: ${bookResult.date}`);
+                  await idataLog("appt_booked", `🎉 RANDEVU BAŞARIYLA ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`);
+                  // Alarm çalmaya devam etsin, kullanıcı fark etsin
+                } else {
+                  console.log(`  ⚠️ Otomatik alma ${bookResult.partial ? "kısmen ilerledi" : "başarısız"}: ${bookResult.error || "Bilinmeyen"}`);
+                  // Randevu hala mevcut mu kontrol et
+                  let fastCheckCount = 0;
+                  while (fastCheckCount < 10) {
+                    await delay(15000, 20000);
+                    fastCheckCount++;
+                    const recheck = await checkAppointments(page, account);
+                    if (recheck.found) {
+                      await idataLog("appt_found", `🎉 RANDEVU HALA MEVCUT! (${fastCheckCount}) | Hesap: ${account.email}`, recheck.screenshot);
+                      // Tekrar dene
+                      const retryBook = await bookEarliestAppointment(page, account);
+                      if (retryBook.success) {
+                        console.log(`  🎉 RANDEVU ALINDI (retry)! Tarih: ${retryBook.date}`);
+                        await idataLog("appt_booked", `🎉 RANDEVU ALINDI (retry)! | Tarih: ${retryBook.date} | Hesap: ${account.email}`);
+                        break;
+                      }
+                    } else {
+                      await idataLog("appt_none", `Randevu kapandı | ${recheck.message || ""} | Hesap: ${account.email}`, recheck.screenshot);
+                      stopAlarm();
+                      break;
+                    }
                   }
+                  if (fastCheckCount >= 10) stopAlarm();
                 }
-                if (fastCheckCount >= 20) stopAlarm();
               } else {
                 stopAlarm();
                 await idataLog("appt_none", `Randevu yok | ${apptResult.message || ""} | Hesap: ${account.email}`, apptResult.screenshot);
