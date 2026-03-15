@@ -1637,9 +1637,18 @@ function cleanupUserDataDir(dir) {
 }
 
 function getResidentialProxyUrl() {
+  // Her bağlantıda benzersiz session ID ile farklı IP al
+  residentialSessionId = Date.now() + Math.floor(Math.random() * 100000);
+  
+  // Bölge rotasyonu yap (her seferinde farklı bölge)
+  const region = getNextProxyRegion();
+  EVOMI_PROXY_REGION = region;
+  
   let pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}`;
-  if (EVOMI_PROXY_REGION) pass += `_region-${EVOMI_PROXY_REGION}`;
-  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${EVOMI_PROXY_REGION || 'yok'})`);
+  pass += `_session-${residentialSessionId}`;
+  if (region) pass += `_region-${region}`;
+  
+  console.log(`  [PROXY] 🏠 Residential proxy: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${region || 'yok'}, session: ${residentialSessionId})`);
   return {
     proxyUrl: `http://${EVOMI_PROXY_USER}:${pass}@${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT}`,
     user: EVOMI_PROXY_USER,
