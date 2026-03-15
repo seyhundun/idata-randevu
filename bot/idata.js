@@ -1917,8 +1917,11 @@ async function loginToIdata(page, account) {
           textLike,
           metaText,
           isCaptcha: /captcha|mailconfirm|do[gğ]rulama|verification/.test(metaText),
-          isMembership: /üyelik|uyelik|membership|member/.test(metaText),
-          isEmail: /e-?posta|email|mail/.test(metaText),
+          isMembership: /üyelik|uyelik|membership|member|numara/.test(metaText),
+          isEmail: /e-?posta|email/.test(metaText) && !/captcha|mailconfirm|do[gğ]rulama|verification/.test(metaText),
+          name: el.name || '',
+          id: el.id || '',
+          placeholder: el.placeholder || '',
         };
       }, input);
 
