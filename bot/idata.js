@@ -2837,6 +2837,7 @@ async function bookEarliestAppointment(page, account) {
             .replace(/ü/g, "u")
             .replace(/ö/g, "o")
             .replace(/ç/g, "c")
+            .replace(/\s+/g, " ")
             .trim();
 
           const monthNames = {
@@ -2868,40 +2869,77 @@ async function bookEarliestAppointment(page, account) {
           const headerSelector = ".datepicker-switch, .picker-switch, .datepicker th.switch, .ui-datepicker-title, .month-year, caption, .datepicker-days .datepicker-switch, th";
           const hasAnchor = anchorX != null && anchorY != null;
 
+          const findCalendarRoot = (startNode) => {
+            let node = startNode;
+            let best = null;
+            let depth = 0;
+            while (node && node !== document.body && depth < 8) {
+              if (node.matches?.(calendarSelector) && isVisible(node)) {
+                const rect = node.getBoundingClientRect();
+                const dayCount = node.querySelectorAll?.("td").length || 0;
+                if (rect.width >= 140 && rect.height >= 120 && dayCount >= 20) {
+                  best = node;
+                }
+              }
+              node = node.parentElement;
+              depth += 1;
+            }
+            return best;
+          };
+
+          const getAnchorScore = (calRect, headerRect, zIndex) => {
+            if (!hasAnchor) return -Math.round(calRect.y);
+            const centerX = calRect.x + calRect.width / 2;
+            const centerY = calRect.y + calRect.height / 2;
+            const distance = Math.hypot(centerX - anchorX, centerY - anchorY);
+            const anchorInsideX = anchorX >= calRect.x - 24 && anchorX <= calRect.x + calRect.width + 24;
+            const calendarBelowInput = calRect.y >= anchorY - 90;
+            const headerBelowInput = headerRect.y >= anchorY - 120;
+            const verticalOffset = calRect.y - anchorY;
+            return (
+              (anchorInsideX ? 220 : -Math.min(220, Math.abs(centerX - anchorX))) +
+              (calendarBelowInput ? 180 : -260) +
+              (headerBelowInput ? 60 : -120) +
+              (verticalOffset >= -40 && verticalOffset <= 420 ? 80 : -80) +
+              Math.min(Math.max(zIndex, 0), 999) / 5 -
+              Math.round(distance)
+            );
+          };
+
           const headerCandidates = Array.from(document.querySelectorAll(headerSelector))
             .map((node) => {
               if (!isVisible(node)) return null;
               const parsed = parseMonthYear(node.innerText || node.textContent || "");
               if (!parsed.month || !parsed.year) return null;
 
-              const calendar = node.closest(calendarSelector) || node.parentElement || document.body;
-              if (!isVisible(calendar)) return null;
+              const calendar = findCalendarRoot(node) || findCalendarRoot(node.parentElement) || node.closest(calendarSelector);
+              if (!calendar || !isVisible(calendar)) return null;
 
               const rect = node.getBoundingClientRect();
               const calRect = calendar.getBoundingClientRect();
+              const style = window.getComputedStyle(calendar);
+              const zIndex = parseInt(style.zIndex || "0", 10) || 0;
               const centerX = calRect.x + calRect.width / 2;
               const centerY = calRect.y + calRect.height / 2;
               const distance = hasAnchor
                 ? Math.hypot(centerX - anchorX, centerY - anchorY)
                 : Math.hypot(centerX, centerY);
-              const anchorInsideX = hasAnchor && anchorX >= calRect.x - 24 && anchorX <= calRect.x + calRect.width + 24;
-              const anchorNearY = hasAnchor && Math.abs(centerY - anchorY) < 280;
-              const anchorScore = hasAnchor
-                ? (anchorInsideX ? 180 : 0) + (anchorNearY ? 120 : 0) - Math.round(distance)
-                : -Math.round(calRect.y);
+              const anchorScore = getAnchorScore(calRect, rect, zIndex);
 
               return {
                 calendar,
+                headerNode: node,
                 ...parsed,
                 anchorScore,
                 distance,
                 rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
                 calendarRect: { x: calRect.x, y: calRect.y, width: calRect.width, height: calRect.height },
+                zIndex,
               };
             })
             .filter(Boolean)
             .sort((a, b) => {
-              if (hasAnchor) return b.anchorScore - a.anchorScore || a.distance - b.distance || a.calendarRect.y - b.calendarRect.y;
+              if (hasAnchor) return b.anchorScore - a.anchorScore || a.distance - b.distance || b.zIndex - a.zIndex;
               return a.calendarRect.y - b.calendarRect.y;
             });
 
@@ -2920,6 +2958,7 @@ async function bookEarliestAppointment(page, account) {
               currentMonth: chosen.month,
               currentYear: chosen.year,
               headerDistance: Math.round(chosen.distance || 0),
+              anchorScore: Math.round(chosen.anchorScore || 0),
             };
           }
 
@@ -2928,11 +2967,23 @@ async function bookEarliestAppointment(page, account) {
             ? ".next, th.next, button[aria-label='Next'], button[title*='Next'], button[aria-label*='Sonraki'], button[title*='Sonraki'], a.next"
             : ".prev, th.prev, button[aria-label='Previous'], button[title*='Prev'], button[aria-label*='Önceki'], button[title*='Önceki'], a.prev";
 
+          const buttonScopes = [
+            chosen.headerNode.closest("tr"),
+            chosen.headerNode.parentElement,
+            chosen.calendar,
+          ].filter(Boolean);
+
+          const scopedButtons = [];
+          for (const scope of buttonScopes) {
+            const found = Array.from(scope.querySelectorAll(buttonSelector)).filter(isVisible);
+            for (const btn of found) {
+              if (!scopedButtons.includes(btn)) scopedButtons.push(btn);
+            }
+          }
+
           const headerCenterX = chosen.rect.x + chosen.rect.width / 2;
           const headerCenterY = chosen.rect.y + chosen.rect.height / 2;
-          const scopedButtons = Array.from(chosen.calendar.querySelectorAll(buttonSelector)).filter(isVisible);
-          const fallbackButtons = scopedButtons.length > 0 ? scopedButtons : Array.from(document.querySelectorAll(buttonSelector)).filter(isVisible);
-          const navButtons = fallbackButtons
+          const navButtons = scopedButtons
             .map((btn) => {
               const rect = btn.getBoundingClientRect();
               const cx = rect.x + rect.width / 2;
@@ -2947,11 +2998,12 @@ async function bookEarliestAppointment(page, account) {
             return {
               done: true,
               clicked: false,
-              reason: `${direction}_button_not_found`,
+              reason: `${direction}_button_not_found_scoped`,
               headerText: chosen.headerText,
               currentMonth: chosen.month,
               currentYear: chosen.year,
               headerDistance: Math.round(chosen.distance || 0),
+              anchorScore: Math.round(chosen.anchorScore || 0),
             };
           }
 
@@ -2965,7 +3017,14 @@ async function bookEarliestAppointment(page, account) {
             currentYear: chosen.year,
             headerDistance: Math.round(chosen.distance || 0),
             buttonDistance: Math.round(bestButton.distance || 0),
-            usedScopedButton: scopedButtons.length > 0,
+            anchorScore: Math.round(chosen.anchorScore || 0),
+            usedScopedButton: true,
+            candidateSample: headerCandidates.slice(0, 3).map((c) => ({
+              headerText: c.headerText,
+              y: Math.round(c.calendarRect.y),
+              score: Math.round(c.anchorScore || 0),
+              distance: Math.round(c.distance || 0),
+            })),
           };
         }, { targetMonth, targetYear, anchorX, anchorY });
 
