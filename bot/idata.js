@@ -2754,9 +2754,90 @@ async function bookEarliestAppointment(page, account) {
     await delay(1500, 2500);
 
     // ===== STEP 3: Takvimden tarih seç =====
-    console.log("  [BOOK] Step 3: Takvimden tarih seçiliyor...");
+    // account.travel_date varsa onu kullan (YYYY-MM-DD format), yoksa bugünden sonraki ilk günü seç
+    const targetTravelDate = account.travel_date || null;
+    let targetDay = null;
+    let targetMonth = null;
+    let targetYear = null;
     
-    const dateSelected = await page.evaluate(() => {
+    if (targetTravelDate) {
+      // "2026-03-20" veya "20.03.2026" formatı
+      const ymd = targetTravelDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+      const dmy = targetTravelDate.match(/(\d{2})[.\/-](\d{2})[.\/-](\d{4})/);
+      if (ymd) { targetYear = parseInt(ymd[1]); targetMonth = parseInt(ymd[2]); targetDay = parseInt(ymd[3]); }
+      else if (dmy) { targetDay = parseInt(dmy[1]); targetMonth = parseInt(dmy[2]); targetYear = parseInt(dmy[3]); }
+    }
+    
+    console.log(`  [BOOK] Step 3: Takvimden tarih seçiliyor... hedef: ${targetDay ? `${targetDay}/${targetMonth}/${targetYear}` : "ilk müsait gün"}`);
+    
+    // Takvimde doğru ay/yıla navigate et
+    if (targetMonth && targetYear) {
+      // Takvimi hedef aya getir (ileri butonuna tıklayarak)
+      for (let navAttempt = 0; navAttempt < 12; navAttempt++) {
+        const calInfo = await page.evaluate(() => {
+          // Takvim başlığındaki ay/yıl bilgisini oku
+          const headers = document.querySelectorAll(
+            ".datepicker-switch, .picker-switch, .datepicker th.switch, " +
+            ".ui-datepicker-title, [class*='datepicker'] th, [class*='calendar'] th, " +
+            ".month-year, caption, .datepicker-days .datepicker-switch"
+          );
+          for (const h of headers) {
+            const text = (h.innerText || h.textContent || "").trim();
+            // "March 2026" veya "Mart 2026" formatı
+            if (text.length > 3 && /\d{4}/.test(text)) {
+              return { headerText: text };
+            }
+          }
+          return { headerText: "" };
+        });
+        
+        if (!calInfo.headerText) break; // Takvim header bulunamadı
+        
+        // Ay isimlerini Türkçe/İngilizce eşle
+        const monthNames = {
+          "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+          "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+          "ocak": 1, "şubat": 2, "mart": 3, "nisan": 4, "mayıs": 5, "haziran": 6,
+          "temmuz": 7, "ağustos": 8, "eylül": 9, "ekim": 10, "kasım": 11, "aralık": 12
+        };
+        
+        const headerLower = calInfo.headerText.toLowerCase();
+        let currentMonth = 0, currentYear = 0;
+        const yearMatch = calInfo.headerText.match(/(\d{4})/);
+        if (yearMatch) currentYear = parseInt(yearMatch[1]);
+        for (const [name, num] of Object.entries(monthNames)) {
+          if (headerLower.includes(name)) { currentMonth = num; break; }
+        }
+        
+        console.log(`  [BOOK] Takvim: ${calInfo.headerText} (ay=${currentMonth}, yıl=${currentYear}) → hedef ay=${targetMonth}, yıl=${targetYear}`);
+        
+        if (currentMonth === targetMonth && currentYear === targetYear) break; // Doğru aydayız
+        
+        // İleri butonuna tıkla
+        const nextClicked = await page.evaluate(() => {
+          const nextBtns = document.querySelectorAll(
+            ".datepicker .next, .datepicker-days .next, .next, " +
+            ".ui-datepicker-next, [class*='next'], th.next, " +
+            "button[aria-label='Next'], a.next"
+          );
+          for (const btn of nextBtns) {
+            const text = (btn.innerText || btn.textContent || btn.title || "").trim();
+            // "»" veya "›" veya ">" sembolleri
+            if (text === "»" || text === "›" || text === ">" || text === "→" || 
+                btn.classList.contains("next") || btn.getAttribute("data-action") === "next") {
+              btn.click();
+              return true;
+            }
+          }
+          return false;
+        });
+        
+        if (!nextClicked) break;
+        await delay(500, 1000);
+      }
+    }
+    
+    const dateSelected = await page.evaluate((tDay) => {
       // Açık takvimi bul
       const calContainers = document.querySelectorAll(
         ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, " +
@@ -2770,7 +2851,6 @@ async function bookEarliestAppointment(page, account) {
         const style = window.getComputedStyle(cal);
         if (style.display === "none" || style.visibility === "hidden") continue;
         
-        // Aktif (tıklanabilir) günleri bul — disabled/old/new olmayanlar
         const days = cal.querySelectorAll(
           "td.day:not(.disabled):not(.old):not(.new):not(.off), " +
           "td:not(.disabled):not(.old):not(.off) .day, " +
@@ -2786,39 +2866,44 @@ async function bookEarliestAppointment(page, account) {
         }
       }
       
-      // Bugünden sonraki ilk tıklanabilir günü seç
-      // today highlight'lı olanı atla, sonrakini seç
       if (clickableDays.length > 0) {
-        // Bugünü (active/today) atla, sonraki ilk günü seç
-        let targetDay = null;
-        const todayEl = document.querySelector("td.today, td.active.today");
-        const todayText = todayEl ? (todayEl.innerText || "").trim() : "";
+        let target = null;
         
-        for (const d of clickableDays) {
-          const dayText = (d.innerText || "").trim();
-          // Bugünden sonraki bir gün
-          if (!d.classList.contains("today") && !d.classList.contains("active")) {
-            targetDay = d;
-            break;
+        // Hedef gün belirtilmişse onu bul
+        if (tDay) {
+          target = clickableDays.find(d => (d.innerText || "").trim() === String(tDay));
+        }
+        
+        // Hedef gün bulunamazsa bugünden sonraki ilk günü seç
+        if (!target) {
+          for (const d of clickableDays) {
+            if (!d.classList.contains("today") && !d.classList.contains("active")) {
+              target = d;
+              break;
+            }
           }
         }
         
-        // Bulunamazsa ilk tıklanabilir günü al
-        if (!targetDay) targetDay = clickableDays[0];
+        if (!target) target = clickableDays[0];
         
-        targetDay.click();
-        return { selected: true, day: (targetDay.innerText || "").trim(), totalDays: clickableDays.length };
+        target.click();
+        return { selected: true, day: (target.innerText || "").trim(), totalDays: clickableDays.length };
       }
       
       return { selected: false, calCount: calContainers.length };
-    });
+    }, targetDay);
 
     console.log(`  [BOOK] Tarih seçimi: ${JSON.stringify(dateSelected)}`);
 
     if (!dateSelected.selected) {
       // Takvim açılmamış olabilir, input'a tarih yaz
-      const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const dateStr = `${String(futureDate.getDate()).padStart(2, "0")}.${String(futureDate.getMonth() + 1).padStart(2, "0")}.${futureDate.getFullYear()}`;
+      let dateStr;
+      if (targetDay && targetMonth && targetYear) {
+        dateStr = `${String(targetDay).padStart(2, "0")}.${String(targetMonth).padStart(2, "0")}.${targetYear}`;
+      } else {
+        const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        dateStr = `${String(futureDate.getDate()).padStart(2, "0")}.${String(futureDate.getMonth() + 1).padStart(2, "0")}.${futureDate.getFullYear()}`;
+      }
       
       await page.evaluate((val) => {
         const inputs = Array.from(document.querySelectorAll("input"));

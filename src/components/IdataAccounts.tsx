@@ -46,6 +46,7 @@ interface IdataAccount {
   residence_city: string | null;
   idata_office: string | null;
   travel_purpose: string | null;
+  travel_date: string | null;
   invoice_type: string;
   invoice_city: string | null;
   invoice_district: string | null;
@@ -87,7 +88,7 @@ export default function IdataAccounts() {
     email: "", password: generateSecurePassword(),
     first_name: "", last_name: "", passport_no: "",
     phone: "", birth_day: "01", birth_month: "01", birth_year: "1990",
-    residence_city: "", idata_office: "", travel_purpose: "",
+    residence_city: "", idata_office: "", travel_purpose: "", travel_date: "",
     invoice_city: "", invoice_district: "", invoice_address: "",
     membership_number: "", imap_host: "imap.gmail.com", imap_password: "",
   });
@@ -156,6 +157,7 @@ export default function IdataAccounts() {
       residence_city: acc.residence_city || "",
       idata_office: acc.idata_office || "",
       travel_purpose: acc.travel_purpose || "",
+      travel_date: acc.travel_date || "",
       invoice_city: acc.invoice_city || "",
       invoice_district: acc.invoice_district || "",
       invoice_address: acc.invoice_address || "",
@@ -172,7 +174,7 @@ export default function IdataAccounts() {
       email: "", password: generateSecurePassword(),
       first_name: "", last_name: "", passport_no: "",
       phone: "", birth_day: "01", birth_month: "01", birth_year: "1990",
-      residence_city: "", idata_office: "", travel_purpose: "",
+      residence_city: "", idata_office: "", travel_purpose: "", travel_date: "",
       invoice_city: "", invoice_district: "", invoice_address: "",
       membership_number: "", imap_host: "imap.gmail.com", imap_password: "",
     });
@@ -409,7 +411,7 @@ export default function IdataAccounts() {
                 <Input placeholder="İstanbul" value={form.idata_office} onChange={e => updateForm("idata_office", e.target.value)} />
               )}
             </div>
-            <div>
+             <div>
               <Label className="text-xs">Gidiş Amacı</Label>
               <select
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -422,6 +424,14 @@ export default function IdataAccounts() {
                 <option value="Lojistik">Lojistik</option>
                 <option value="Diğer">Diğer</option>
               </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs">Seyahat Başlangıç Tarihi</Label>
+              <Input type="date" value={form.travel_date} onChange={e => updateForm("travel_date", e.target.value)} />
+              <p className="text-[10px] text-muted-foreground mt-0.5">Bot takvimden bu tarihi seçer (gg.aa.yyyy)</p>
             </div>
           </div>
 
@@ -492,6 +502,7 @@ export default function IdataAccounts() {
                      {acc.passport_no && <span className="text-xs text-muted-foreground">🛂 {acc.passport_no}</span>}
                      {acc.membership_number && <span className="text-xs text-muted-foreground font-mono">🆔 {acc.membership_number}</span>}
                      {acc.idata_office && <span className="text-xs text-muted-foreground">🏢 {acc.idata_office}</span>}
+                     {acc.travel_date && <span className="text-xs text-muted-foreground">✈️ {acc.travel_date}</span>}
                      {acc.imap_password && <Badge className="bg-green-500/10 text-green-600 border-green-500/20 text-[10px]">📧 IMAP</Badge>}
                   </div>
                 </div>
