@@ -58,7 +58,7 @@ export default function BotSettingsPanel() {
       .channel("bot-settings-sync")
       .on("postgres_changes", { event: "*", schema: "public", table: "vfs_countries" }, () => loadCountries())
       .on("postgres_changes", { event: "*", schema: "public", table: "bot_settings" }, () => loadSettings())
-      .on("postgres_changes", { event: "*", schema: "public", table: "tracking_logs" }, () => loadCurrentIp())
+      
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
