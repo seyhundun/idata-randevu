@@ -3693,10 +3693,16 @@ async function bookEarliestAppointment(page, account) {
 
       const verifyTimeSelection = async () => {
         return await page.evaluate((targetTime) => {
+          const normalizeTime = (txt) => {
+            const m = (txt || "").replace(/\s+/g, " ").match(/(\d{1,2}[:.]\d{2})/);
+            return m ? m[1].replace(".", ":") : "";
+          };
+
           const controls = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
           for (const el of controls) {
             const txt = (el.innerText || el.textContent || el.value || "").trim();
-            if (!txt.includes(targetTime)) continue;
+            const normalizedTextTime = normalizeTime(txt);
+            if (!normalizedTextTime || normalizedTextTime !== targetTime) continue;
 
             const style = window.getComputedStyle(el);
             const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
