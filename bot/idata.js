@@ -3006,9 +3006,9 @@ async function bookEarliestAppointment(page, account) {
 
     // ===== STEP 2: TARİH sayfası — "Randevu Tarihinizi Seçiniz" takvim ikonuna tıkla =====
     console.log("  [BOOK] Step 2: TARİH sayfası — 'Randevu Tarihinizi Seçiniz' takvim ikonu aranıyor...");
-    
-    // Sayfadaki input-group'ları tara, randevu tarih input'unu kesin hedefle
-    const calIconClicked = await page.evaluate(() => {
+
+    // Randevu tarih inputunu puanla: seyahat alanını dışla, alt inputu (daha büyük Y) önceliklendir.
+    const calIconProbe = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll("input"));
 
       const isVisible = (el) => {
@@ -3017,129 +3017,182 @@ async function bookEarliestAppointment(page, account) {
         return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
       };
 
-      // 0) "Randevu Tarihinizi Seçiniz" placeholder'lı VEYA değeri BOŞ olan date input'u
-      //    (Değeri dolu olan seyahat tarihi inputunu ATLIYORUZ)
-      let targetInput = null;
+      const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+      const apptWords = ["randevu", "appointment", "slot", "tarih"];
 
-      // Tüm date input'larını topla
-      const dateInputs = inputs.filter(inp => {
-        if (!isVisible(inp)) return false;
-        const cls = (inp.className || "").toLowerCase();
-        return cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker");
-      });
+      const hasWord = (txt, words) => words.some((w) => txt.includes(w));
 
-      // Seyahat ile ilgili olanları filtrele, kalanlardan randevu inputunu seç
-      const nonTravelDateInputs = dateInputs.filter(inp => {
-        const ph = (inp.placeholder || "").toLowerCase();
-        const name = (inp.name || "").toLowerCase();
-        const id = (inp.id || "").toLowerCase();
-        // Seyahat/gidiş/travel ile ilgili olanları dışla
-        const isTravelField = ph.includes("seyahat") || ph.includes("gidiş") || ph.includes("travel") ||
-                              name.includes("seyahat") || name.includes("travel") || name.includes("flight") ||
-                              id.includes("seyahat") || id.includes("travel") || id.includes("flight");
-        return !isTravelField;
-      });
+      const getLabelText = (inp) => {
+        const byFor = inp.id ? document.querySelector(`label[for='${inp.id}']`) : null;
+        if (byFor) return (byFor.innerText || byFor.textContent || "").toLowerCase();
+        const wrap = inp.closest(".form-group, .input-group, .row, .col-md-6, .col-sm-6, div");
+        if (!wrap) return "";
+        const lbl = wrap.querySelector("label");
+        return lbl ? (lbl.innerText || lbl.textContent || "").toLowerCase() : "";
+      };
 
-      // Seyahat dışı date input varsa onu kullan (randevu inputu), yoksa boş değerli olanı seç
-      if (nonTravelDateInputs.length > 0) {
-        targetInput = nonTravelDateInputs[0];
-      } else {
-        // Fallback: değeri boş olan date input
-        targetInput = dateInputs.find(inp => !(inp.value || "").trim());
-      }
-
-      // 1) "Randevu Tarihinizi Seçiniz" placeholder'lı input
-      if (!targetInput) {
-        targetInput = inputs.find(inp => {
-          if (!isVisible(inp)) return false;
+      const dateCandidates = inputs
+        .filter(isVisible)
+        .map((inp) => {
           const ph = (inp.placeholder || "").toLowerCase();
-          return ph.includes("randevu tarih") || ph.includes("randevu tarihinizi");
-        });
-      }
-
-      // 2) Fallback: "tarih" içeren ama "seyahat" olmayan, date class'lı input
-      if (!targetInput) {
-        targetInput = inputs.find(inp => {
-          if (!isVisible(inp)) return false;
-          const ph = (inp.placeholder || "").toLowerCase();
+          const nm = (inp.name || "").toLowerCase();
+          const id = (inp.id || "").toLowerCase();
           const cls = (inp.className || "").toLowerCase();
-          return ph.includes("tarih") && !ph.includes("seyahat") && (cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker"));
-        });
-      }
+          const label = getLabelText(inp);
+          const blob = `${ph} ${nm} ${id} ${cls} ${label}`;
+          const rect = inp.getBoundingClientRect();
+          const val = (inp.value || "").trim();
 
-      if (targetInput) {
-        const inputRect = targetInput.getBoundingClientRect();
-        const parent = targetInput.closest(".input-group, .form-group, div");
-        if (parent) {
-          const icons = Array.from(parent.querySelectorAll(
-            ".input-group-addon, .input-group-append, .input-group-text, " +
-            "span.glyphicon-calendar, span.fa-calendar, i.fa-calendar, " +
-            "i.glyphicon-calendar, span[class*='calendar'], i[class*='calendar'], " +
-            "button[class*='calendar'], .datepickerbutton, img[src*='calendar']"
-          ));
+          const isDateLike =
+            cls.includes("calendarinput") ||
+            cls.includes("flightdate") ||
+            cls.includes("datepicker") ||
+            ph.includes("tarih") ||
+            nm.includes("date") ||
+            nm.includes("tarih") ||
+            id.includes("date") ||
+            id.includes("tarih");
 
-          // Aynı parent'taki en sağdaki (genelde input'a ait) ikonu tıkla
-          if (icons.length > 0) {
-            const sorted = icons
-              .filter(isVisible)
-              .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
-            const icon = sorted[0] || icons[0];
-            icon.click();
-            return {
-              clicked: true,
-              method: "icon_in_parent",
-              tag: icon.tagName,
-              cls: (icon.className || "").substring(0, 80),
-              inputX: inputRect.x + inputRect.width / 2,
-              inputY: inputRect.y + inputRect.height / 2,
-            };
-          }
+          if (!isDateLike) return null;
 
-          const addon = parent.querySelector(".input-group-addon, .input-group-btn, .input-group-append");
-          if (addon) {
-            addon.click();
-            return {
-              clicked: true,
-              method: "addon_click",
-              tag: addon.tagName,
-              inputX: inputRect.x + inputRect.width / 2,
-              inputY: inputRect.y + inputRect.height / 2,
-            };
-          }
+          const isTravel = hasWord(blob, travelWords);
+          const isAppointmentHint = hasWord(blob, apptWords) && !isTravel;
+
+          let score = 0;
+          if (isAppointmentHint) score += 180;
+          if (ph.includes("randevu")) score += 220;
+          if (nm.includes("randevu") || id.includes("randevu")) score += 180;
+          if (!val) score += 60;
+          if (val) score -= 40;
+          if (isTravel) score -= 300;
+          // Kullanıcının dediği gibi alt inputu önceliklendir
+          score += Math.floor(rect.y / 3);
+
+          return {
+            score,
+            rect,
+            input: inp,
+            ph,
+            nm,
+            id,
+            cls,
+            label,
+            val,
+            isTravel,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score || b.rect.y - a.rect.y);
+
+      if (!dateCandidates.length) return { found: false, clicked: false };
+
+      const chosen = dateCandidates[0];
+      const targetInput = chosen.input;
+      const inputRect = chosen.rect;
+      const inputCenterX = inputRect.x + inputRect.width / 2;
+      const inputCenterY = inputRect.y + inputRect.height / 2;
+
+      let clickTarget = { x: inputCenterX, y: inputCenterY, kind: "input" };
+
+      const parent = targetInput.closest(".input-group, .form-group, div");
+      if (parent) {
+        const icons = Array.from(parent.querySelectorAll(
+          ".input-group-addon, .input-group-append, .input-group-text, " +
+          "span.glyphicon-calendar, span.fa-calendar, i.fa-calendar, " +
+          "i.glyphicon-calendar, span[class*='calendar'], i[class*='calendar'], " +
+          "button[class*='calendar'], .datepickerbutton, img[src*='calendar']"
+        )).filter(isVisible);
+
+        if (icons.length > 0) {
+          const scoredIcons = icons
+            .map((icon) => {
+              const r = icon.getBoundingClientRect();
+              const cx = r.x + r.width / 2;
+              const cy = r.y + r.height / 2;
+              const dx = Math.abs(cx - (inputRect.x + inputRect.width));
+              const dy = Math.abs(cy - inputCenterY);
+              const score = (cx >= inputRect.x ? 90 : 0) - dx - dy * 2;
+              return { icon, cx, cy, score };
+            })
+            .sort((a, b) => b.score - a.score);
+
+          const best = scoredIcons[0];
+          if (best) clickTarget = { x: best.cx, y: best.cy, kind: "icon" };
         }
-
-        targetInput.click();
-        targetInput.focus();
-        return {
-          clicked: true,
-          method: "input_click",
-          inputX: inputRect.x + inputRect.width / 2,
-          inputY: inputRect.y + inputRect.height / 2,
-        };
       }
 
-      // 3) Son fallback: tüm takvim ikonlarından SONUNCU olanı dene (ilk ikon seyahat alanı olabiliyor)
-      const allIcons = Array.from(document.querySelectorAll(
-        ".glyphicon-calendar, .fa-calendar, [class*='calendar'], " +
-        ".input-group-addon, img[src*='calendar']"
-      )).filter(isVisible);
+      window.__idataApptInputHint = {
+        id: targetInput.id || "",
+        name: targetInput.name || "",
+        placeholder: targetInput.placeholder || "",
+        y: inputRect.y,
+      };
 
-      if (allIcons.length > 0) {
-        const last = allIcons[allIcons.length - 1];
-        const rect = last.getBoundingClientRect();
-        last.click();
-        return {
-          clicked: true,
-          method: "last_icon",
-          tag: last.tagName,
-          totalIcons: allIcons.length,
-          inputX: rect.x + rect.width / 2,
-          inputY: rect.y + rect.height / 2,
-        };
-      }
-
-      return { clicked: false };
+      return {
+        found: true,
+        clicked: false,
+        selectedInput: {
+          id: chosen.id,
+          name: chosen.nm,
+          placeholder: chosen.ph,
+          label: chosen.label,
+          value: chosen.val,
+          y: Math.round(chosen.rect.y),
+          score: chosen.score,
+          isTravel: chosen.isTravel,
+        },
+        clickTarget,
+        inputX: inputCenterX,
+        inputY: inputCenterY,
+      };
     });
+
+    console.log(`  [BOOK] Takvim input adayı: ${JSON.stringify(calIconProbe.selectedInput || calIconProbe)}`);
+
+    let calIconClicked = {
+      clicked: false,
+      inputX: calIconProbe?.inputX ?? null,
+      inputY: calIconProbe?.inputY ?? null,
+    };
+
+    if (calIconProbe.found && calIconProbe.clickTarget) {
+      try {
+        await humanClick(page, calIconProbe.clickTarget.x, calIconProbe.clickTarget.y, { preMovesNear: true });
+        calIconClicked = {
+          clicked: true,
+          method: `human_${calIconProbe.clickTarget.kind}`,
+          inputX: calIconProbe.inputX,
+          inputY: calIconProbe.inputY,
+        };
+      } catch (mouseErr) {
+        console.log(`  [BOOK] Takvim ikonu humanClick hata: ${mouseErr.message}`);
+      }
+    }
+
+    if (!calIconClicked.clicked && calIconProbe.found && calIconProbe.clickTarget) {
+      const domFallback = await page.evaluate((target) => {
+        const el = document.elementFromPoint(target.x, target.y);
+        if (!el) return { clicked: false };
+
+        el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        if (typeof el.click === "function") el.click();
+
+        return { clicked: true, tag: el.tagName, cls: (el.className || "").substring(0, 80) };
+      }, calIconProbe.clickTarget);
+
+      if (domFallback.clicked) {
+        calIconClicked = {
+          clicked: true,
+          method: `dom_${calIconProbe.clickTarget.kind}`,
+          tag: domFallback.tag,
+          inputX: calIconProbe.inputX,
+          inputY: calIconProbe.inputY,
+        };
+      }
+    }
 
     console.log(`  [BOOK] Takvim ikonu: ${JSON.stringify(calIconClicked)}`);
     await delay(2000, 3000);
