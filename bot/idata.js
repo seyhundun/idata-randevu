@@ -3952,7 +3952,21 @@ async function bookEarliestAppointment(page, account) {
         };
       });
 
-      await idataLog(`appt_page_${pageIdx}`, `Sayfa ${pageIdx} | URL: ${pageState.url} | İleri: ${pageState.hasIleri} | Ödeme: ${pageState.hasPayment} | EkHizmet: ${pageState.hasEkHizmetler} | Fatura: ${pageState.hasFatura} | KrediKartı: ${pageState.hasKrediKarti} | Checkbox: ${pageState.checkboxCount} | Hesap: ${account.email}\n${pageState.bodyPreview.substring(0, 500)}`, ssPage);
+      await idataLog(`appt_page_${pageIdx}`, `Sayfa ${pageIdx} | URL: ${pageState.url} | İleri: ${pageState.hasIleri} | Ödeme: ${pageState.hasPayment} | EkHizmet: ${pageState.hasEkHizmetler} | Fatura: ${pageState.hasFatura} | KrediKartı: ${pageState.hasKrediKarti} | DateWarn: ${pageState.hasDateWarning} | Checkbox: ${pageState.checkboxCount} | Hesap: ${account.email}\n${pageState.bodyPreview.substring(0, 500)}`, ssPage);
+
+      // ===== Tarih/saat warning yakalandı — akışı resetle ve üst döngüden yeniden dene =====
+      if (pageState.hasDateWarning) {
+        await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button, a, [role="button"]'));
+          const ok = btns.find(b => {
+            const txt = (b.innerText || b.textContent || b.value || "").trim().toUpperCase();
+            return txt === "TAMAM" || txt === "OK" || txt === "KAPAT" || txt === "ANLADIM";
+          });
+          if (ok) ok.click();
+        }).catch(() => {});
+        await idataLog("appt_date_warning", `⚠️ Tarih/saat warning Step6'da yakalandı, booking akışı yeniden denenecek | Hesap: ${account.email}`, ssPage);
+        return { success: false, partial: true, error: "date_time_warning_after_ileri" };
+      }
 
       // ===== Başarılı =====
       if (pageState.success) {
