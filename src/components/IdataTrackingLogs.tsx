@@ -49,7 +49,8 @@ const statusConfig: Record<string, { icon: React.ReactNode; label: string; color
   appt_found:     { icon: <CheckCircle2 className="w-4 h-4" />, label: "🎉 RANDEVU BULUNDU!", color: "text-green-600 bg-green-500/15 font-bold" },
   appt_none:      { icon: <Ban className="w-4 h-4" />, label: "Randevu Yok", color: "text-muted-foreground bg-muted/50" },
   appt_book:      { icon: <MousePointer className="w-4 h-4" />, label: "Randevu Alınıyor", color: "text-green-500 bg-green-500/10" },
-  appt_booked:    { icon: <CheckCircle2 className="w-4 h-4" />, label: "✅ Randevu Alındı!", color: "text-green-600 bg-green-500/15 font-bold" },
+  appt_booked:    { icon: <CheckCircle2 className="w-4 h-4" />, label: "✅ Ödeme Başarılı — Randevu Alındı!", color: "text-green-600 bg-green-500/15 font-bold" },
+  appt_payment_page: { icon: <MousePointer className="w-4 h-4" />, label: "💳 Ödeme Sayfası", color: "text-amber-500 bg-amber-500/10 font-bold" },
 
   // --- Account management ---
   account_switch: { icon: <RefreshCw className="w-4 h-4" />, label: "Hesap Değişti", color: "text-blue-400 bg-blue-400/10" },
