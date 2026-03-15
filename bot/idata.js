@@ -152,7 +152,11 @@ async function fetchEvomiRegions() {
     const allCities = productData.cities?.data || [];
     const trCities = allCities
       .filter(c => c.countryCode === "TR")
-      .map(c => (c.city || c.name || "").toLowerCase().replace(/\s+/g, ""))
+      .map(c => {
+        const raw = (c.city || c.name || "").toLowerCase().replace(/\s+/g, "");
+        // .province, .city gibi son ekleri temizle
+        return raw.replace(/\.(province|city|region|state)$/i, "");
+      })
       .filter(Boolean);
 
     // Eğer şehir yoksa region'ları dene
