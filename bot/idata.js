@@ -3300,7 +3300,11 @@ async function bookEarliestAppointment(page, account) {
             }
           }
           // Date input değeri gerçekten seçilen günü yansıtıyor mu kontrol et
-          const dateInputs = document.querySelectorAll("input[data-provide='datepicker'], input.datepicker, input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i]");
+          // iDATA uses .calendarinput and .flightDate classes
+          const dateInputs = document.querySelectorAll(
+            "input[data-provide='datepicker'], input.datepicker, input.calendarinput, input.flightDate, " +
+            "input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i], input[placeholder*='tarih' i]"
+          );
           for (const inp of dateInputs) {
             const v = (inp.value || "").trim();
             if (!v) continue;
