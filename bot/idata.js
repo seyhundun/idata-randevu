@@ -3513,19 +3513,18 @@ async function bookEarliestAppointment(page, account) {
       const fallbackDay = dateInfo?.found ? dateInfo.day : targetDay;
       let dateStr;
       if (fallbackDay && headerMonth && headerYear) {
-        dateStr = `${String(fallbackDay).padStart(2, "0")}.${String(headerMonth).padStart(2, "0")}.${headerYear}`;
+        dateStr = `${String(fallbackDay).padStart(2, "0")}-${String(headerMonth).padStart(2, "0")}-${headerYear}`;
       } else if (fallbackDay && targetMonth && targetYear) {
-        dateStr = `${String(fallbackDay).padStart(2, "0")}.${String(targetMonth).padStart(2, "0")}.${targetYear}`;
+        dateStr = `${String(fallbackDay).padStart(2, "0")}-${String(targetMonth).padStart(2, "0")}-${targetYear}`;
       } else if (targetDay && targetMonth && targetYear) {
-        dateStr = `${String(targetDay).padStart(2, "0")}.${String(targetMonth).padStart(2, "0")}.${targetYear}`;
+        dateStr = `${String(targetDay).padStart(2, "0")}-${String(targetMonth).padStart(2, "0")}-${targetYear}`;
       } else {
         const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        dateStr = `${String(futureDate.getDate()).padStart(2, "0")}.${String(futureDate.getMonth() + 1).padStart(2, "0")}.${futureDate.getFullYear()}`;
+        dateStr = `${String(futureDate.getDate()).padStart(2, "0")}-${String(futureDate.getMonth() + 1).padStart(2, "0")}-${futureDate.getFullYear()}`;
       }
 
-      await page.evaluate((val) => {
+      await page.evaluate((val, dayNum) => {
         const inputs = Array.from(document.querySelectorAll("input"));
-        // iDATA: calendarinput, flightDate class'larını öncelikle hedefle
         const dateInput = inputs.find(inp => {
           const cls = (inp.className || "").toLowerCase();
           return cls.includes("calendarinput") || cls.includes("flightdate");
@@ -3535,20 +3534,34 @@ async function bookEarliestAppointment(page, account) {
           return ph.includes("randevu") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
         });
         if (dateInput) {
+          // Mevcut format tespiti (tire mi nokta mı)
+          const existingVal = (dateInput.value || "").trim();
+          const usesDash = existingVal.includes("-");
+          const finalVal = usesDash ? val : val.replace(/-/g, ".");
+          
           dateInput.value = "";
           dateInput.focus();
-          dateInput.value = val;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+          nativeSetter.call(dateInput, finalVal);
           dateInput.dispatchEvent(new Event("input", { bubbles: true }));
           dateInput.dispatchEvent(new Event("change", { bubbles: true }));
           dateInput.dispatchEvent(new Event("blur", { bubbles: true }));
           if (typeof window.jQuery !== "undefined") {
             try {
-              window.jQuery(dateInput).datepicker("update", val);
-              window.jQuery(dateInput).trigger("changeDate");
-            } catch (_) {}
+              // setDate ile Date objesi kullan (en güvenilir)
+              const parts = val.split("-");
+              const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+              window.jQuery(dateInput).datepicker("setDate", dateObj);
+              window.jQuery(dateInput).trigger("changeDate").trigger("change");
+            } catch (_) {
+              try {
+                window.jQuery(dateInput).datepicker("update", finalVal);
+                window.jQuery(dateInput).trigger("changeDate");
+              } catch (__) {}
+            }
           }
         }
-      }, dateStr);
+      }, dateStr, fallbackDay);
       console.log(`  [BOOK] Manuel tarih girildi: ${dateStr}`);
     }
 
