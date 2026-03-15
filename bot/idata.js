@@ -3282,16 +3282,24 @@ async function bookEarliestAppointment(page, account) {
 
       const verifyDateSelection = async () => {
         return await page.evaluate((dayNum) => {
-          const calContainers = document.querySelectorAll("[class*='datepicker'], [class*='calendar'], table.table-condensed");
+          // Bootstrap datepicker + ASP.NET takvim desteği
+          const calContainers = document.querySelectorAll("[class*='datepicker'], [class*='calendar'], table.table-condensed, .datepicker-days table");
           for (const cal of calContainers) {
             const tds = cal.querySelectorAll("td");
             for (const d of tds) {
               const text = (d.innerText || d.textContent || "").trim();
               if (parseInt(text) === dayNum) {
                 const cls = (d.className || "").toLowerCase();
-                const isActive = cls.includes("active") || cls.includes("selected");
+                const isActive = cls.includes("active") || cls.includes("selected") || cls.includes("focused") || cls.includes("highlighted");
                 if (isActive) return { isActive: true, cls };
               }
+            }
+          }
+          // Ayrıca datepicker input'undaki değeri kontrol et
+          const dateInputs = document.querySelectorAll("input[data-provide='datepicker'], input.datepicker, input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i]");
+          for (const inp of dateInputs) {
+            if (inp.value && inp.value.trim().length > 0) {
+              return { isActive: true, cls: "input-has-value: " + inp.value };
             }
           }
           return { isActive: false, cls: "" };
