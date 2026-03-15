@@ -3084,7 +3084,8 @@ async function bookEarliestAppointment(page, account) {
     }
 
     // ===== STEP 6+: Sonraki sayfaları döngüyle işle =====
-    const MAX_PAGES = 5;
+    // Akış: TARİH → Ek Hizmetlerx (bilgi) → EK HİZMETLER (checkbox'lar) → Popup Tamam → ÖDEME İŞLEMLERİ (fatura+sözleşme) → Kredi kartı sayfası
+    const MAX_PAGES = 8;
     for (let pageIdx = 0; pageIdx < MAX_PAGES; pageIdx++) {
       console.log(`  [BOOK] Step 6.${pageIdx}: Sayfa analiz ediliyor...`);
       
@@ -3092,9 +3093,10 @@ async function bookEarliestAppointment(page, account) {
       const pageState = await page.evaluate(() => {
         const body = (document.body?.innerText || "");
         const lower = body.toLowerCase();
+        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
         return {
           url: window.location.href,
-          bodyPreview: body.substring(0, 1500),
+          bodyPreview: body.substring(0, 2000),
           hasIleri: !!Array.from(document.querySelectorAll('a, button, input')).find(el => {
             const txt = (el.innerText || el.value || "").trim().toUpperCase();
             return txt === "İLERİ" || txt === "ILERI";
@@ -3103,50 +3105,183 @@ async function bookEarliestAppointment(page, account) {
             const txt = (el.innerText || el.value || "").trim().toUpperCase();
             return txt.includes("ONAYLA") || txt.includes("CONFIRM") || txt.includes("TAMAMLA") || txt.includes("KAYDET");
           }),
-          hasPayment: lower.includes("ödeme") || lower.includes("payment") || lower.includes("kredi kartı"),
-          hasTravelDate: lower.includes("seyahat başlangıç"),
+          hasOdemeYap: !!Array.from(document.querySelectorAll('a, button, input')).find(el => {
+            const txt = (el.innerText || el.value || "").trim().toUpperCase();
+            return txt.includes("ÖDEME YAP") || txt.includes("ODEME YAP");
+          }),
+          hasPayment: lower.includes("ödeme") || lower.includes("payment") || lower.includes("kredi kartı") || lower.includes("banka"),
+          hasEkHizmetler: lower.includes("ek hizmetler"),
+          hasFatura: lower.includes("fatura bilgileri") || lower.includes("fatura bil"),
+          hasSozlesme: lower.includes("okudum") || lower.includes("kabul ediyorum"),
+          hasKrediKarti: lower.includes("bankamatik kart") || lower.includes("kredi kartı") || lower.includes("kart numarası") || lower.includes("cvv"),
           hasError: lower.includes("hata") || lower.includes("error"),
           success: lower.includes("başarılı") || lower.includes("randevunuz oluşturulmuştur") || lower.includes("onaylandı") || lower.includes("tamamlandı"),
+          checkboxCount: checkboxes.length,
           hasSelectInputs: document.querySelectorAll("select").length,
         };
       });
 
-      await idataLog(`appt_page_${pageIdx}`, `Sayfa ${pageIdx} | URL: ${pageState.url} | İleri: ${pageState.hasIleri} | Onayla: ${pageState.hasOnayla} | Ödeme: ${pageState.hasPayment} | Hesap: ${account.email}\n${pageState.bodyPreview.substring(0, 500)}`, ssPage);
+      await idataLog(`appt_page_${pageIdx}`, `Sayfa ${pageIdx} | URL: ${pageState.url} | İleri: ${pageState.hasIleri} | Ödeme: ${pageState.hasPayment} | EkHizmet: ${pageState.hasEkHizmetler} | Fatura: ${pageState.hasFatura} | KrediKartı: ${pageState.hasKrediKarti} | Checkbox: ${pageState.checkboxCount} | Hesap: ${account.email}\n${pageState.bodyPreview.substring(0, 500)}`, ssPage);
 
-      // Başarılı
+      // ===== Başarılı =====
       if (pageState.success) {
         startAlarm();
         await idataLog("appt_booked", `🎉 RANDEVU ALINDI! | Hesap: ${account.email}`, ssPage);
-        return { success: true, date: dateSelected.day || "?" };
+        return { success: true, date: calDatePick.day || dateSelected?.day || "?" };
       }
 
-      // Hata durumu
-      if (pageState.hasError && !pageState.hasIleri && !pageState.hasOnayla) {
-        return { success: false, error: "Hata sayfası", partial: true };
-      }
-
-      // Ödeme sayfası — durdurup bildir
-      if (pageState.hasPayment) {
+      // ===== KREDİ KARTI SAYFASI — DUR! =====
+      if (pageState.hasKrediKarti) {
         startAlarm();
-        await idataLog("appt_payment_page", `💳 ÖDEME SAYFASINA ULAŞILDI! Manuel ödeme gerekli. | Hesap: ${account.email}`, ssPage);
-        return { success: true, date: dateSelected.day || "?", needsPayment: true };
+        await idataLog("appt_payment_page", `💳 KREDİ KARTI SAYFASINA ULAŞILDI! Manuel ödeme gerekli. | Hesap: ${account.email}`, ssPage);
+        return { success: true, date: calDatePick.day || dateSelected?.day || "?", needsPayment: true };
       }
 
-      // Select/dropdown'ları otomatik doldur
-      if (pageState.hasSelectInputs > 0) {
+      // ===== ÖDEME İŞLEMLERİ sayfası (Fatura + Sözleşme onayları) =====
+      if (pageState.hasFatura && pageState.hasSozlesme && pageState.hasOdemeYap) {
+        console.log(`  [BOOK] 💳 ÖDEME sayfası tespit edildi — fatura bilgileri dolduruluyor...`);
+        
+        // Fatura bilgilerini doldur (Bireysel seçili, şehir/ilçe/adres)
+        await page.evaluate((acc) => {
+          // Bireysel radio zaten seçili olmalı
+          const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
+          const bireyselRadio = radios.find(r => {
+            const label = r.closest("label")?.innerText || r.parentElement?.innerText || "";
+            return label.toLowerCase().includes("bireysel");
+          });
+          if (bireyselRadio && !bireyselRadio.checked) bireyselRadio.click();
+
+          // Şehir select (Gaziantep vb.)
+          if (acc.invoice_city || acc.residence_city) {
+            const cityVal = acc.invoice_city || acc.residence_city;
+            const selects = Array.from(document.querySelectorAll("select"));
+            for (const sel of selects) {
+              for (const opt of sel.options) {
+                if (opt.text.toLowerCase().includes(cityVal.toLowerCase())) {
+                  sel.value = opt.value;
+                  sel.dispatchEvent(new Event("change", { bubbles: true }));
+                  break;
+                }
+              }
+            }
+          }
+        }, account);
+        await delay(1500, 2500);
+
+        // İlçe select (şehir seçildikten sonra yüklenir)
+        if (account.invoice_district) {
+          await page.evaluate((district) => {
+            const selects = Array.from(document.querySelectorAll("select"));
+            // İlçe genellikle 2. select
+            for (const sel of selects) {
+              for (const opt of sel.options) {
+                if (opt.text.toLowerCase().includes(district.toLowerCase())) {
+                  sel.value = opt.value;
+                  sel.dispatchEvent(new Event("change", { bubbles: true }));
+                  break;
+                }
+              }
+            }
+          }, account.invoice_district);
+          await delay(1000, 2000);
+        }
+
+        // Adres input
+        if (account.invoice_address) {
+          await page.evaluate((addr) => {
+            const inputs = Array.from(document.querySelectorAll("input[type='text'], textarea"));
+            // Adres alanı genellikle "adres" placeholder veya sonuncu uzun input
+            const addrInput = inputs.find(inp => {
+              const ph = (inp.placeholder || "").toLowerCase();
+              const name = (inp.name || "").toLowerCase();
+              return ph.includes("adres") || name.includes("adres") || name.includes("address");
+            }) || inputs[inputs.length - 1];
+            if (addrInput) {
+              addrInput.value = "";
+              addrInput.focus();
+              addrInput.value = addr;
+              addrInput.dispatchEvent(new Event("input", { bubbles: true }));
+              addrInput.dispatchEvent(new Event("change", { bubbles: true }));
+              addrInput.dispatchEvent(new Event("blur", { bubbles: true }));
+            }
+          }, account.invoice_address);
+          await delay(500, 1000);
+        }
+
+        // Sözleşme checkbox'larını işaretle (Okudum anladım kabul ediyorum x2 + KVKK)
+        console.log(`  [BOOK] Sözleşme checkbox'ları işaretleniyor...`);
         await page.evaluate(() => {
-          const selects = Array.from(document.querySelectorAll("select"));
-          for (const sel of selects) {
-            if (sel.selectedIndex === 0 && sel.options.length > 1) {
-              sel.selectedIndex = 1;
-              sel.dispatchEvent(new Event("change", { bubbles: true }));
+          const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+          for (const cb of checkboxes) {
+            if (!cb.checked) {
+              cb.checked = true;
+              cb.dispatchEvent(new Event("change", { bubbles: true }));
+              cb.dispatchEvent(new Event("click", { bubbles: true }));
+              cb.click();
             }
           }
         });
-        await delay(1000, 2000);
+        await delay(1500, 2500);
+
+        const ssFatura = await takeScreenshotBase64(page);
+        await idataLog("appt_fatura_filled", `📝 Fatura bilgileri dolduruldu, sözleşmeler onaylandı | Hesap: ${account.email}`, ssFatura);
+
+        // ÖDEME YAP butonuna tıkla
+        console.log(`  [BOOK] ÖDEME YAP butonuna tıklanıyor...`);
+        await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'));
+          const btn = candidates.find(el => {
+            const txt = (el.innerText || el.value || el.textContent || "").trim().toUpperCase();
+            return txt.includes("ÖDEME YAP") || txt.includes("ODEME YAP");
+          });
+          if (btn) {
+            if (btn.disabled) btn.disabled = false;
+            btn.click();
+          }
+        });
+        await delay(5000, 8000);
+
+        // Popup kontrolü
+        await page.evaluate(() => {
+          const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button');
+          for (const btn of closeButtons) {
+            const txt = (btn.innerText || "").trim().toUpperCase();
+            if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT" || txt === "EVET") { btn.click(); break; }
+          }
+        });
+        await delay(3000, 5000);
+        continue; // Bir sonraki sayfa (kredi kartı sayfası olmalı)
       }
 
-      // Onay butonu varsa tıkla
+      // ===== EK HİZMETLER sayfası — checkbox'ları İŞARETLEME, direkt İLERİ =====
+      if (pageState.hasEkHizmetler && pageState.checkboxCount > 0) {
+        console.log(`  [BOOK] Ek Hizmetler sayfası — ${pageState.checkboxCount} checkbox var, hiçbiri işaretlenmeyecek, İLERİ tıklanıyor...`);
+        // Tüm checkbox'ların işaretsiz olduğundan emin ol
+        await page.evaluate(() => {
+          const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+          for (const cb of checkboxes) {
+            if (cb.checked) {
+              cb.checked = false;
+              cb.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+        });
+        await delay(500, 1000);
+      }
+
+      // ===== Hata durumu =====
+      if (pageState.hasError && !pageState.hasIleri && !pageState.hasOnayla && !pageState.hasOdemeYap) {
+        return { success: false, error: "Hata sayfası", partial: true };
+      }
+
+      // ===== Ödeme sayfası (genel) — durdurup bildir =====
+      if (pageState.hasPayment && !pageState.hasIleri && !pageState.hasEkHizmetler) {
+        startAlarm();
+        await idataLog("appt_payment_page", `💳 ÖDEME SAYFASINA ULAŞILDI! | Hesap: ${account.email}`, ssPage);
+        return { success: true, date: calDatePick.day || dateSelected?.day || "?", needsPayment: true };
+      }
+
+      // ===== Onay butonu varsa tıkla =====
       if (pageState.hasOnayla) {
         console.log(`  [BOOK] 🟢 Onay butonu tıklanıyor...`);
         await page.evaluate(() => {
@@ -3168,10 +3303,10 @@ async function bookEarliestAppointment(page, account) {
           }
         });
         await delay(2000, 3000);
-        continue; // Sonraki sayfa analizi
+        continue;
       }
 
-      // İLERİ butonu varsa tıkla
+      // ===== İLERİ butonu varsa tıkla =====
       if (pageState.hasIleri) {
         console.log(`  [BOOK] ➡ İLERİ butonu tıklanıyor (sayfa ${pageIdx})...`);
         await page.evaluate(() => {
@@ -3184,9 +3319,9 @@ async function bookEarliestAppointment(page, account) {
         });
         await delay(3000, 5000);
         
-        // Popup kapat
+        // Popup kapat (ör: "Başvuru Sürecini Kolaylaştırmayı Unutma" popup'ı)
         await page.evaluate(() => {
-          const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, button');
+          const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button, a');
           for (const btn of closeButtons) {
             const txt = (btn.innerText || "").trim().toUpperCase();
             if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT" || txt === "EVET") { btn.click(); break; }
