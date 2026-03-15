@@ -3161,82 +3161,117 @@ async function bookEarliestAppointment(page, account) {
       }
     }
     
-    // Yeşil günleri tespit et — koordinatlarını al (mouse.click için)
-    const dateInfo = await page.evaluate((tDay) => {
-      const calContainers = document.querySelectorAll(
+    // Yeşil günleri tespit et — doğru takvimi hedefle (input'a en yakın görünür takvim)
+    const dateInfo = await page.evaluate((tDay, anchorX, anchorY) => {
+      const calContainers = Array.from(document.querySelectorAll(
         ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, " +
         ".datepicker-days, .flatpickr-calendar, .ui-datepicker, " +
         "[class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed"
-      );
-      
-      let allDays = [];
-      
+      ));
+
+      const candidateCalendars = [];
+
       for (const cal of calContainers) {
         const style = window.getComputedStyle(cal);
+        const calRect = cal.getBoundingClientRect();
         if (style.display === "none" || style.visibility === "hidden") continue;
-        
+        if (calRect.width < 140 || calRect.height < 120) continue;
+
+        const days = [];
         const tds = cal.querySelectorAll("td");
         for (const d of tds) {
           const text = (d.innerText || d.textContent || "").trim();
           if (!/^\d{1,2}$/.test(text)) continue;
           if (d.classList.contains("disabled") || d.classList.contains("off") || d.classList.contains("old")) continue;
-          
+
           const dayNum = parseInt(text);
           const bgColor = window.getComputedStyle(d).backgroundColor;
-          
+
           const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
           let isGreen = false, isRed = false, isYellow = false;
-          
+
           if (rgbMatch) {
             const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
             isGreen = g > 100 && g > r * 1.3 && g > b * 1.3;
             isRed = r > 150 && r > g * 1.5 && r > b * 1.5;
             isYellow = r > 200 && g > 150 && b < 100;
           }
-          
+
           if (d.classList.contains("bg-success") || d.classList.contains("success")) isGreen = true;
           if (d.classList.contains("bg-danger") || d.classList.contains("danger")) isRed = true;
           if (d.classList.contains("bg-warning") || d.classList.contains("warning") || d.classList.contains("today") || d.classList.contains("active")) isYellow = true;
-          
-          // ASP.NET postback: <td> içindeki <a> etiketini bul
+
           const innerLink = d.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
           const postbackHref = innerLink ? (innerLink.getAttribute("href") || "") : "";
-          // __doPostBack argümanlarını çıkar
           let postbackTarget = null, postbackArg = null;
           const pbMatch = postbackHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
           if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
-          
+
           const clickableEl = innerLink || d;
           const rect = clickableEl.getBoundingClientRect();
-          allDays.push({ 
-            day: dayNum, isGreen, isRed, isYellow, bgColor, 
-            x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
-            hasLink: !!innerLink, postbackTarget, postbackArg,
+
+          days.push({
+            day: dayNum,
+            isGreen,
+            isRed,
+            isYellow,
+            bgColor,
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+            hasLink: !!innerLink,
+            postbackTarget,
+            postbackArg,
             linkHref: postbackHref.substring(0, 200)
           });
         }
+
+        if (days.length < 20) continue; // gerçek takvim değilse ele
+
+        const calCenterX = calRect.x + calRect.width / 2;
+        const calCenterY = calRect.y + calRect.height / 2;
+        const distance = (anchorX != null && anchorY != null)
+          ? Math.hypot(calCenterX - anchorX, calCenterY - anchorY)
+          : 9999;
+
+        candidateCalendars.push({ days, distance, width: calRect.width, height: calRect.height });
       }
-      
+
+      if (candidateCalendars.length === 0) {
+        return { found: false, totalDays: 0, reason: "calendar_not_found" };
+      }
+
+      candidateCalendars.sort((a, b) => a.distance - b.distance);
+      const selectedCalendar = candidateCalendars[0];
+      const allDays = selectedCalendar.days;
+
       const greenDays = allDays.filter(d => d.isGreen).sort((a, b) => a.day - b.day);
       const nonRedDays = allDays.filter(d => !d.isRed && !d.isYellow).sort((a, b) => a.day - b.day);
       const pool = greenDays.length > 0 ? greenDays : (nonRedDays.length > 0 ? nonRedDays : allDays);
-      
+
       if (pool.length > 0) {
         let target = null;
         if (tDay) target = pool.find(d => d.day === tDay);
-        // İlk yeşil gün yerine bir sonraki (2.) yeşil günü seç (varsa)
         if (!target) target = pool.length > 1 ? pool[1] : pool[0];
-        return { 
-          found: true, day: target.day, isGreen: target.isGreen,
-          x: target.x, y: target.y,
-          totalDays: allDays.length, greenCount: greenDays.length, bgColor: target.bgColor,
-          hasLink: target.hasLink, postbackTarget: target.postbackTarget, postbackArg: target.postbackArg,
-          linkHref: target.linkHref
+
+        return {
+          found: true,
+          day: target.day,
+          isGreen: target.isGreen,
+          x: target.x,
+          y: target.y,
+          totalDays: allDays.length,
+          greenCount: greenDays.length,
+          bgColor: target.bgColor,
+          hasLink: target.hasLink,
+          postbackTarget: target.postbackTarget,
+          postbackArg: target.postbackArg,
+          linkHref: target.linkHref,
+          calendarDistance: selectedCalendar.distance,
         };
       }
-      
-      return { found: false, totalDays: allDays.length };
-    }, targetDay);
+
+      return { found: false, totalDays: allDays.length, reason: "no_days_in_pool" };
+    }, targetDay, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null);
 
     console.log(`  [BOOK] Tarih bilgisi: ${JSON.stringify(dateInfo)}`);
     
