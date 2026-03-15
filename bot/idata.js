@@ -3322,8 +3322,12 @@ async function bookEarliestAppointment(page, account) {
 
           const innerLink = d.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
           const postbackHref = innerLink ? (innerLink.getAttribute("href") || "") : "";
+          const onclickText = `${innerLink?.getAttribute("onclick") || ""} ${d.getAttribute("onclick") || ""}`;
+
           let postbackTarget = null, postbackArg = null;
-          const pbMatch = postbackHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+          const hrefPb = postbackHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+          const onclickPb = onclickText.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+          const pbMatch = hrefPb || onclickPb;
           if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
 
           const clickableEl = innerLink || d;
@@ -3340,7 +3344,8 @@ async function bookEarliestAppointment(page, account) {
             hasLink: !!innerLink,
             postbackTarget,
             postbackArg,
-            linkHref: postbackHref.substring(0, 200)
+            linkHref: postbackHref.substring(0, 200),
+            onclickText: onclickText.substring(0, 200),
           });
         }
 
