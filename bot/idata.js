@@ -1123,8 +1123,11 @@ function getResidentialProxyUrl() {
   residentialSessionId++;
   let pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}_session-idata${residentialSessionId}`;
   if (EVOMI_PROXY_REGION) {
-    // Bölge adından .province, .city gibi son ekleri temizle
-    const cleanRegion = EVOMI_PROXY_REGION.replace(/\.(province|city|region|state)$/i, "").trim();
+    // Obje veya string olabilir, normalize et
+    let cleanRegion = typeof EVOMI_PROXY_REGION === "object" 
+      ? (EVOMI_PROXY_REGION.city || EVOMI_PROXY_REGION.name || "") 
+      : String(EVOMI_PROXY_REGION);
+    cleanRegion = cleanRegion.toLowerCase().replace(/\s+/g, "").replace(/\.(province|city|region|state)$/i, "").trim();
     if (cleanRegion) pass += `_region-${cleanRegion}`;
   }
   console.log(`  [PROXY] 🏠 Residential: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${EVOMI_PROXY_REGION || 'yok'}, session: idata${residentialSessionId})`);
