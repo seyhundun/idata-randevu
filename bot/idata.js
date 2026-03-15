@@ -1111,9 +1111,14 @@ async function solveImageCaptcha(page, options = {}) {
 
 // ==================== BROWSER LAUNCH ====================
 function getResidentialProxyUrl() {
-  let pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}`;
-  if (EVOMI_PROXY_REGION) pass += `_region-${EVOMI_PROXY_REGION}`;
-  console.log(`  [PROXY] 🏠 Residential: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${EVOMI_PROXY_REGION || 'yok'})`);
+  residentialSessionId++;
+  let pass = `${EVOMI_PROXY_PASS}_country-${EVOMI_PROXY_COUNTRY}_session-idata${residentialSessionId}`;
+  if (EVOMI_PROXY_REGION) {
+    // Bölge adından .province, .city gibi son ekleri temizle
+    const cleanRegion = EVOMI_PROXY_REGION.replace(/\.(province|city|region|state)$/i, "").trim();
+    if (cleanRegion) pass += `_region-${cleanRegion}`;
+  }
+  console.log(`  [PROXY] 🏠 Residential: ${EVOMI_PROXY_HOST}:${EVOMI_PROXY_PORT} (ülke: ${EVOMI_PROXY_COUNTRY}, bölge: ${EVOMI_PROXY_REGION || 'yok'}, session: idata${residentialSessionId})`);
   return { user: EVOMI_PROXY_USER, pass, host: EVOMI_PROXY_HOST, port: EVOMI_PROXY_PORT };
 }
 
