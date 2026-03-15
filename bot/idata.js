@@ -94,18 +94,99 @@ const IP_BAN_DURATION_MS = Number(process.env.IP_BAN_DURATION_MS || 1800000);
 
 // ==================== PROXY REGION ROTATION ====================
 const PROXY_REGIONS_FALLBACK = ["ankara", "adana", "konya", "istanbul", "izmir", "bursa", "antalya"];
+let evomiRegionsCache = []; // Evomi API'den çekilen bölgeler
+let evomiRegionsLastFetch = 0;
 let currentRegionIndex = -1;
-let DB_PROXY_REGION = ""; // Dashboard'dan seçilen sabit bölge
+let DB_PROXY_REGION = ""; // Dashboard'dan seçilen sabit bölge (idata için artık kullanılmıyor)
 const PROXY_ISP_LIST = "vodafonenetdslm,turkcellinterne,vodafonenetadsl,superonlinebroa,turktelekom,turktelekomunik,vodafoneturkey,vodafonenetdslk";
 
-function getNextProxyRegion() {
-  if (DB_PROXY_REGION) {
-    console.log(`  [PROXY] 🏙 Dashboard bölgesi kullanılıyor: ${DB_PROXY_REGION}`);
-    return DB_PROXY_REGION;
+// Evomi API'den Türkiye bölgelerini çek
+async function fetchEvomiRegions() {
+  const now = Date.now();
+  // 10 dakikada bir güncelle
+  if (evomiRegionsCache.length > 0 && now - evomiRegionsLastFetch < 600000) {
+    return evomiRegionsCache;
   }
-  currentRegionIndex = (currentRegionIndex + 1) % PROXY_REGIONS_FALLBACK.length;
-  const region = PROXY_REGIONS_FALLBACK[currentRegionIndex];
-  console.log(`  [PROXY] 🏙 Bölge rotasyonu: ${region} (${currentRegionIndex + 1}/${PROXY_REGIONS_FALLBACK.length})`);
+  try {
+    const fetch = (await import("node-fetch")).default;
+    // bot_settings'den evomi_api_key al
+    const settingsRes = await fetch(
+      "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/bot_settings?select=key,value",
+      {
+        headers: {
+          apikey: CONFIG.API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const settings = await settingsRes.json();
+    const map = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+    const apiKey = map.evomi_api_key;
+    if (!apiKey) {
+      console.warn("  [EVOMI] ⚠️ evomi_api_key bulunamadı, fallback bölgeler kullanılacak");
+      return PROXY_REGIONS_FALLBACK;
+    }
+
+    // Evomi settings API'den bölgeleri çek
+    const evomiRes = await fetch("https://api.evomi.com/public/settings", {
+      headers: { "x-apikey": apiKey },
+    });
+    if (!evomiRes.ok) {
+      console.warn(`  [EVOMI] ⚠️ API hatası [${evomiRes.status}], fallback bölgeler kullanılacak`);
+      return PROXY_REGIONS_FALLBACK;
+    }
+    const evomiData = await evomiRes.json();
+
+    // Proxy host'a göre ürün tipini belirle
+    const host = map.proxy_host || EVOMI_PROXY_HOST || "";
+    let product = "rpc"; // core residential default
+    if (host.includes("rp.evomi") || host.includes("premium")) product = "rp";
+
+    const productData = evomiData?.data?.[product];
+    if (!productData) {
+      console.warn(`  [EVOMI] ⚠️ Ürün verisi bulunamadı (${product}), fallback bölgeler kullanılacak`);
+      return PROXY_REGIONS_FALLBACK;
+    }
+
+    // Türkiye şehirlerini filtrele
+    const allCities = productData.cities?.data || [];
+    const trCities = allCities
+      .filter(c => c.countryCode === "TR")
+      .map(c => (c.city || c.name || "").toLowerCase().replace(/\s+/g, ""))
+      .filter(Boolean);
+
+    // Eğer şehir yoksa region'ları dene
+    if (trCities.length > 0) {
+      evomiRegionsCache = [...new Set(trCities)]; // benzersiz
+      evomiRegionsLastFetch = now;
+      console.log(`  [EVOMI] ✅ ${evomiRegionsCache.length} TR bölge bulundu: ${evomiRegionsCache.slice(0, 10).join(", ")}${evomiRegionsCache.length > 10 ? "..." : ""}`);
+      return evomiRegionsCache;
+    }
+
+    // Fallback: genel region listesi
+    const allRegions = productData.regions?.data || [];
+    if (allRegions.length > 0) {
+      evomiRegionsCache = allRegions;
+      evomiRegionsLastFetch = now;
+      console.log(`  [EVOMI] ✅ ${evomiRegionsCache.length} genel bölge bulundu (TR şehir yok)`);
+      return evomiRegionsCache;
+    }
+
+    console.warn("  [EVOMI] ⚠️ Hiç bölge bulunamadı, fallback kullanılacak");
+    return PROXY_REGIONS_FALLBACK;
+  } catch (e) {
+    console.warn(`  [EVOMI] ⚠️ Bölge çekme hatası: ${e.message}, fallback kullanılacak`);
+    return PROXY_REGIONS_FALLBACK;
+  }
+}
+
+async function getNextProxyRegion() {
+  // Her zaman Türkiye, bölge her seferinde değişsin
+  EVOMI_PROXY_COUNTRY = "TR";
+  const regions = await fetchEvomiRegions();
+  currentRegionIndex = (currentRegionIndex + 1) % regions.length;
+  const region = regions[currentRegionIndex];
+  console.log(`  [PROXY] 🏙 Bölge rotasyonu: ${region} (${currentRegionIndex + 1}/${regions.length})`);
   return region;
 }
 
@@ -2694,7 +2775,7 @@ async function mainLoop() {
           // Residential modda her denemede bölge rotasyonu yap
           if (PROXY_MODE === "residential") {
             residentialSessionId++;
-            EVOMI_PROXY_REGION = getNextProxyRegion();
+            EVOMI_PROXY_REGION = await getNextProxyRegion();
           }
           let browser, page;
           try {
