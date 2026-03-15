@@ -3075,8 +3075,17 @@ async function bookEarliestAppointment(page, account) {
         ".input-group-addon, img[src*='calendar']"
       ));
       if (allIcons.length > 0) {
-        allIcons[0].click();
-        return { clicked: true, method: "first_icon", tag: allIcons[0].tagName, totalIcons: allIcons.length };
+        const first = allIcons[0];
+        const rect = first.getBoundingClientRect();
+        first.click();
+        return {
+          clicked: true,
+          method: "first_icon",
+          tag: first.tagName,
+          totalIcons: allIcons.length,
+          inputX: rect.x + rect.width / 2,
+          inputY: rect.y + rect.height / 2,
+        };
       }
       
       return { clicked: false };
