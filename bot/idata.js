@@ -3783,43 +3783,73 @@ async function bookEarliestAppointment(page, account) {
         dateStr = `${String(futureDate.getDate()).padStart(2, "0")}-${String(futureDate.getMonth() + 1).padStart(2, "0")}-${futureDate.getFullYear()}`;
       }
 
-      await page.evaluate((val, dayNum) => {
+      await page.evaluate((val) => {
         const inputs = Array.from(document.querySelectorAll("input"));
-        const dateInput = inputs.find(inp => {
-          const cls = (inp.className || "").toLowerCase();
-          return cls.includes("calendarinput") || cls.includes("flightdate");
-        }) || inputs.find(inp => {
-          const ph = (inp.placeholder || "").toLowerCase();
-          const nm = (inp.name || "").toLowerCase();
-          return ph.includes("randevu") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
-        });
-        if (dateInput) {
-          // iDATA için ana format her zaman tire
-          const finalVal = val;
-          
-          dateInput.value = "";
-          dateInput.focus();
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-          nativeSetter.call(dateInput, finalVal);
-          dateInput.dispatchEvent(new Event("input", { bubbles: true }));
-          dateInput.dispatchEvent(new Event("change", { bubbles: true }));
-          dateInput.dispatchEvent(new Event("blur", { bubbles: true }));
-          if (typeof window.jQuery !== "undefined") {
+        const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+        const apptWords = ["randevu", "appointment", "slot", "tarih"];
+        const hasWord = (txt, words) => words.some((w) => txt.includes(w));
+
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+
+        const candidates = inputs
+          .filter(isVisible)
+          .map((inp) => {
+            const ph = (inp.placeholder || "").toLowerCase();
+            const nm = (inp.name || "").toLowerCase();
+            const id = (inp.id || "").toLowerCase();
+            const cls = (inp.className || "").toLowerCase();
+            const blob = `${ph} ${nm} ${id} ${cls}`;
+
+            const isDateLike = cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
+            if (!isDateLike) return null;
+
+            const isTravel = hasWord(blob, travelWords);
+            const isAppt = hasWord(blob, apptWords) && !isTravel;
+            const rect = inp.getBoundingClientRect();
+
+            let score = 0;
+            if (isAppt) score += 180;
+            if (ph.includes("randevu")) score += 220;
+            if (nm.includes("randevu") || id.includes("randevu")) score += 180;
+            if (isTravel) score -= 300;
+            if (!(inp.value || "").trim()) score += 60;
+            score += Math.floor(rect.y / 3);
+
+            return { inp, score, y: rect.y };
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.score - a.score || b.y - a.y);
+
+        const dateInput = candidates[0]?.inp || null;
+        if (!dateInput) return;
+
+        const finalVal = val;
+        dateInput.value = "";
+        dateInput.focus();
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeSetter.call(dateInput, finalVal);
+        dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+        dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+        dateInput.dispatchEvent(new Event("blur", { bubbles: true }));
+
+        if (typeof window.jQuery !== "undefined") {
+          try {
+            const parts = val.split("-");
+            const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+            window.jQuery(dateInput).datepicker("setDate", dateObj);
+            window.jQuery(dateInput).trigger("changeDate").trigger("change");
+          } catch (_) {
             try {
-              // setDate ile Date objesi kullan (en güvenilir)
-              const parts = val.split("-");
-              const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-              window.jQuery(dateInput).datepicker("setDate", dateObj);
-              window.jQuery(dateInput).trigger("changeDate").trigger("change");
-            } catch (_) {
-              try {
-                window.jQuery(dateInput).datepicker("update", finalVal);
-                window.jQuery(dateInput).trigger("changeDate");
-              } catch (__) {}
-            }
+              window.jQuery(dateInput).datepicker("update", finalVal);
+              window.jQuery(dateInput).trigger("changeDate");
+            } catch (__) {}
           }
         }
-      }, dateStr, fallbackDay);
+      }, dateStr);
       console.log(`  [BOOK] Manuel tarih girildi: ${dateStr}`);
     }
 
