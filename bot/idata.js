@@ -2013,9 +2013,24 @@ async function loginToIdata(page, account) {
     if (passwordCandidates[0]?.el) {
       console.log(`  [LOGIN] Şifre giriliyor`);
       const typed = await humanType(page, passwordCandidates[0].el, account.password, { minDelay: 120, maxDelay: 260, retries: 3 });
-      if (!typed) console.log("  [LOGIN] ⚠ Şifre tam yazılamadı");
+      const val = await page.evaluate(el => el?.value?.length || 0, passwordCandidates[0].el).catch(() => 0);
+      console.log(`  [LOGIN] Şifre yazıldı mı: ${typed}, karakter sayısı: ${val}`);
+      if (!typed || val === 0) {
+        console.log("  [LOGIN] ⚠ Şifre yazılamadı — tekrar dene");
+        await passwordCandidates[0].el.click({ clickCount: 3 }).catch(() => {});
+        await page.keyboard.press('Backspace').catch(() => {});
+        await delay(500, 800);
+        await humanType(page, passwordCandidates[0].el, account.password, { minDelay: 120, maxDelay: 260, retries: 2 });
+      }
       await delay(1000, 1800);
+    } else {
+      console.log("  [LOGIN] ❌ Şifre alanı bulunamadı!");
+      await idataLog("login_form", "❌ Şifre input bulunamadı");
     }
+
+    // Tüm alanlar doldurulduktan sonra doğrulama screenshot'ı
+    const preSubmitShot = await takeScreenshotBase64(page);
+    await idataLog("login_form_filled", "Form alanları dolduruldu — CAPTCHA çözülecek", preSubmitShot);
 
     // 4) CAPTCHA çöz ve son text input'a gir
     const captchaCode = await solveImageCaptcha(page, { maxAttempts: 3 });
