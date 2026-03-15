@@ -3861,86 +3861,128 @@ async function bookEarliestAppointment(page, account) {
     console.log("  [BOOK] Step 4: Turuncu saat butonu aranıyor...");
     await delay(2000, 3000);
 
-    // Önce saat butonlarının konumunu tespit et (sadece gerçekten tıklanabilir elemanlar)
-    const timeButtonInfo = await page.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
-      const timeButtons = [];
+    // Saat slotları bazen AJAX ile geç geliyor; birkaç tur bekleyip tekrar tara
+    const scanTimeButtons = async () => {
+      return await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll(
+          "button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour, li, span, div, td, label"
+        ));
 
-      for (const el of candidates) {
-        const rawText = (el.innerText || el.textContent || el.value || "").trim();
+        const normalizeTime = (txt) => {
+          const m = (txt || "").replace(/\s+/g, " ").match(/(\d{1,2}[:.]\d{2})/);
+          if (!m) return "";
+          const [h, mm] = m[1].replace(".", ":").split(":");
+          return `${String(parseInt(h, 10)).padStart(2, "0")}:${mm}`;
+        };
 
-        const style = window.getComputedStyle(el);
-        const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
-        if (!isVisible || el.offsetHeight < 10 || el.offsetWidth < 20) continue;
+        const parseMinutes = (time) => {
+          const m = (time || "").match(/^(\d{2}):(\d{2})$/);
+          if (!m) return 9999;
+          return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        };
 
-        const cls = (el.className || "").toLowerCase();
-        const tag = el.tagName;
-        const role = (el.getAttribute("role") || "").toLowerCase();
-        const isLikelyClickable = tag === "BUTTON" || tag === "A" || tag === "INPUT" || role === "button" || cls.includes("btn") || cls.includes("getdatebtnhour");
-        if (!isLikelyClickable) continue;
+        const timeButtons = [];
 
-        // Konteyner div/span yerine gerçek kontrolü hedefle
-        const childControls = Array.from(el.querySelectorAll("button, a, input"));
-        const hasNestedTimeControl = childControls.some(child => {
-          const childTxt = (child.innerText || child.textContent || child.value || "").trim();
-          return /(\d{1,2}[:.]\d{2})/.test(childTxt);
-        });
-        if (hasNestedTimeControl && tag !== "BUTTON" && tag !== "A" && tag !== "INPUT") continue;
+        for (const el of candidates) {
+          const style = window.getComputedStyle(el);
+          const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
+          if (!isVisible || el.offsetHeight < 8 || el.offsetWidth < 12) continue;
 
-        // Saat metnini daha esnek yakala: 9:30, 09:30, 09.30
-        const normalizedRawText = rawText.replace(/\s+/g, " ");
-        const parsedTime = normalizedRawText.match(/(\d{1,2}[:.]\d{2})/);
-        if (!parsedTime && !cls.includes("getdatebtnhour")) continue;
+          const cls = (el.className || "").toLowerCase();
+          const tag = el.tagName;
+          const role = (el.getAttribute("role") || "").toLowerCase();
+          const hrefSelf = el.getAttribute("href") || "";
+          const childLink = el.querySelector("a[href]");
+          const href = hrefSelf || (childLink ? (childLink.getAttribute("href") || "") : "");
+          const hasPostback = href.includes("__doPostBack");
 
-        const matchedTime = parsedTime
-          ? parsedTime[1].replace(".", ":")
-          : (el.getAttribute("data-time") || "").replace(".", ":");
-        if (!matchedTime) continue;
+          const rawText = (el.innerText || el.textContent || el.value || el.getAttribute("data-time") || el.getAttribute("title") || "").trim();
+          const matchedTime = normalizeTime(rawText);
+          if (!matchedTime) continue;
 
-        const bgColor = style.backgroundColor;
-        const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-        let isOrange = false;
-        if (rgbMatch) {
-          const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
-          isOrange = r > 180 && g > 80 && b < 100;
+          const childControls = Array.from(el.querySelectorAll("button, a, input"));
+          const hasNestedTimeControl = childControls.some((child) => normalizeTime(child.innerText || child.textContent || child.value || ""));
+          if (hasNestedTimeControl && tag !== "BUTTON" && tag !== "A" && tag !== "INPUT") continue;
+
+          const isLikelyClickable =
+            tag === "BUTTON" ||
+            tag === "A" ||
+            tag === "INPUT" ||
+            role === "button" ||
+            cls.includes("btn") ||
+            cls.includes("slot") ||
+            cls.includes("hour") ||
+            cls.includes("getdatebtnhour") ||
+            hasPostback;
+          if (!isLikelyClickable) continue;
+
+          const bgColor = style.backgroundColor;
+          const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+          let isOrange = false;
+          if (rgbMatch) {
+            const r = parseInt(rgbMatch[1], 10);
+            const g = parseInt(rgbMatch[2], 10);
+            const b = parseInt(rgbMatch[3], 10);
+            isOrange = r > 170 && g > 70 && g < 190 && b < 120;
+          }
+          if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("warning") || cls.includes("active") || cls.includes("getdatebtnhour") || cls.includes("slot-selected")) {
+            isOrange = true;
+          }
+
+          let postbackTarget = null;
+          let postbackArg = null;
+          const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+          if (pbMatch) {
+            postbackTarget = pbMatch[1];
+            postbackArg = pbMatch[2];
+          }
+
+          const rect = el.getBoundingClientRect();
+          timeButtons.push({
+            time: matchedTime,
+            sortMinute: parseMinutes(matchedTime),
+            isOrange,
+            bgColor,
+            tag,
+            cls: (el.className || "").substring(0, 120),
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+            postbackTarget,
+            postbackArg,
+          });
         }
-        if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("warning") || cls.includes("active") || cls.includes("getdatebtnhour")) isOrange = true;
 
-        const href = el.getAttribute("href") || "";
-        let postbackTarget = null, postbackArg = null;
-        const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
-        if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
-
-        const rect = el.getBoundingClientRect();
-        timeButtons.push({
-          time: matchedTime,
-          isOrange,
-          bgColor,
-          tag,
-          cls: (el.className || "").substring(0, 120),
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-          postbackTarget,
-          postbackArg,
+        const sorted = [...timeButtons].sort((a, b) => {
+          if (a.isOrange !== b.isOrange) return a.isOrange ? -1 : 1;
+          if (a.sortMinute !== b.sortMinute) return a.sortMinute - b.sortMinute;
+          return a.y - b.y;
         });
+
+        const target = sorted.length > 0 ? sorted[0] : null;
+        return {
+          found: !!target,
+          target,
+          totalSlots: timeButtons.length,
+          allSlots: sorted.slice(0, 10).map((t) => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, cls: t.cls.substring(0, 40), pb: !!t.postbackTarget })),
+        };
+      });
+    };
+
+    let timeButtonInfo = { found: false, target: null, totalSlots: 0, allSlots: [] };
+    for (let scanAttempt = 0; scanAttempt < 6; scanAttempt++) {
+      timeButtonInfo = await scanTimeButtons();
+      if (timeButtonInfo.found) break;
+
+      // Slotlar yüklenmediyse seçilen güne fiziksel tıklamayı bir kez daha tetikle
+      if (scanAttempt === 1 && dateInfo?.found) {
+        try {
+          await humanClick(page, dateInfo.x, dateInfo.y, { preMovesNear: true });
+          console.log("  [BOOK] Saat listesi için tarih tekrar tıklandı (humanClick)");
+        } catch (_) {}
       }
 
-      const sorted = [...timeButtons].sort((a, b) => {
-        if (a.isOrange !== b.isOrange) return a.isOrange ? -1 : 1;
-        const aPreferred = /getdatebtnhour|btn-warning|btn/.test(a.cls.toLowerCase());
-        const bPreferred = /getdatebtnhour|btn-warning|btn/.test(b.cls.toLowerCase());
-        if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
-        return 0;
-      });
-
-      const target = sorted.length > 0 ? sorted[0] : null;
-      return {
-        found: !!target,
-        target,
-        totalSlots: timeButtons.length,
-        allSlots: timeButtons.map(t => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, cls: t.cls.substring(0, 40), pb: !!t.postbackTarget })),
-      };
-    });
+      await delay(700, 1200);
+    }
 
     console.log(`  [BOOK] Saat butonları: ${JSON.stringify(timeButtonInfo)}`);
 
