@@ -3026,6 +3026,7 @@ async function bookEarliestAppointment(page, account) {
       }
       
       if (targetInput) {
+        const inputRect = targetInput.getBoundingClientRect();
         // Input-group içindeki takvim ikonunu bul
         const parent = targetInput.closest(".input-group, .form-group, div");
         if (parent) {
@@ -3037,17 +3038,35 @@ async function bookEarliestAppointment(page, account) {
           );
           for (const icon of icons) {
             icon.click();
-            return { clicked: true, method: "icon_in_parent", tag: icon.tagName, cls: (icon.className || "").substring(0, 80) };
+            return {
+              clicked: true,
+              method: "icon_in_parent",
+              tag: icon.tagName,
+              cls: (icon.className || "").substring(0, 80),
+              inputX: inputRect.x + inputRect.width / 2,
+              inputY: inputRect.y + inputRect.height / 2,
+            };
           }
           const addon = parent.querySelector(".input-group-addon, .input-group-btn, .input-group-append");
           if (addon) {
             addon.click();
-            return { clicked: true, method: "addon_click", tag: addon.tagName };
+            return {
+              clicked: true,
+              method: "addon_click",
+              tag: addon.tagName,
+              inputX: inputRect.x + inputRect.width / 2,
+              inputY: inputRect.y + inputRect.height / 2,
+            };
           }
         }
         targetInput.click();
         targetInput.focus();
-        return { clicked: true, method: "input_click" };
+        return {
+          clicked: true,
+          method: "input_click",
+          inputX: inputRect.x + inputRect.width / 2,
+          inputY: inputRect.y + inputRect.height / 2,
+        };
       }
       
       // 3) Tüm takvim ikonlarını dene (ilki = Randevu Tarihi olmalı)
