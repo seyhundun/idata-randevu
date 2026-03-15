@@ -240,7 +240,6 @@ echo "✅ Güncelleme tamamlandı"`}
 # VFS:   http://187.77.161.201:6080/vnc.html
 # iDATA: http://187.77.161.201:6081/vnc.html`}
           />
-          />
         </Section>
 
         {/* ===== VNC EKRAN SORUNLARI ===== */}
