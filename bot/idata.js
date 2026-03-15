@@ -2866,6 +2866,7 @@ async function bookEarliestAppointment(page, account) {
 
           const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
           const headerSelector = ".datepicker-switch, .picker-switch, .datepicker th.switch, .ui-datepicker-title, .month-year, caption, .datepicker-days .datepicker-switch, th";
+          const hasAnchor = anchorX != null && anchorY != null;
 
           const headerCandidates = Array.from(document.querySelectorAll(headerSelector))
             .map((node) => {
@@ -2880,18 +2881,29 @@ async function bookEarliestAppointment(page, account) {
               const calRect = calendar.getBoundingClientRect();
               const centerX = calRect.x + calRect.width / 2;
               const centerY = calRect.y + calRect.height / 2;
-              const distance = (anchorX != null && anchorY != null)
+              const distance = hasAnchor
                 ? Math.hypot(centerX - anchorX, centerY - anchorY)
                 : Math.hypot(centerX, centerY);
+              const anchorInsideX = hasAnchor && anchorX >= calRect.x - 24 && anchorX <= calRect.x + calRect.width + 24;
+              const anchorNearY = hasAnchor && Math.abs(centerY - anchorY) < 280;
+              const anchorScore = hasAnchor
+                ? (anchorInsideX ? 180 : 0) + (anchorNearY ? 120 : 0) - Math.round(distance)
+                : -Math.round(calRect.y);
 
               return {
+                calendar,
                 ...parsed,
+                anchorScore,
+                distance,
                 rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
                 calendarRect: { x: calRect.x, y: calRect.y, width: calRect.width, height: calRect.height },
               };
             })
             .filter(Boolean)
-            .sort((a, b) => a.calendarRect.y - b.calendarRect.y || a.distance - b.distance);
+            .sort((a, b) => {
+              if (hasAnchor) return b.anchorScore - a.anchorScore || a.distance - b.distance || a.calendarRect.y - b.calendarRect.y;
+              return a.calendarRect.y - b.calendarRect.y;
+            });
 
           if (!headerCandidates.length) {
             return { done: true, clicked: false, reason: "header_not_found" };
@@ -2907,28 +2919,30 @@ async function bookEarliestAppointment(page, account) {
               headerText: chosen.headerText,
               currentMonth: chosen.month,
               currentYear: chosen.year,
+              headerDistance: Math.round(chosen.distance || 0),
             };
           }
 
           const direction = deltaMonths > 0 ? "next" : "prev";
           const buttonSelector = direction === "next"
-            ? ".datepicker .next, .next, th.next, button[aria-label='Next'], button[title*='Next'], button[aria-label*='Sonraki'], button[title*='Sonraki'], a.next"
-            : ".datepicker .prev, .prev, th.prev, button[aria-label='Previous'], button[title*='Prev'], button[aria-label*='Önceki'], button[title*='Önceki'], a.prev";
+            ? ".next, th.next, button[aria-label='Next'], button[title*='Next'], button[aria-label*='Sonraki'], button[title*='Sonraki'], a.next"
+            : ".prev, th.prev, button[aria-label='Previous'], button[title*='Prev'], button[aria-label*='Önceki'], button[title*='Önceki'], a.prev";
 
           const headerCenterX = chosen.rect.x + chosen.rect.width / 2;
           const headerCenterY = chosen.rect.y + chosen.rect.height / 2;
-          const navButtons = Array.from(document.querySelectorAll(buttonSelector))
-            .filter(isVisible)
+          const scopedButtons = Array.from(chosen.calendar.querySelectorAll(buttonSelector)).filter(isVisible);
+          const fallbackButtons = scopedButtons.length > 0 ? scopedButtons : Array.from(document.querySelectorAll(buttonSelector)).filter(isVisible);
+          const navButtons = fallbackButtons
             .map((btn) => {
               const rect = btn.getBoundingClientRect();
               const cx = rect.x + rect.width / 2;
               const cy = rect.y + rect.height / 2;
               const distance = Math.hypot(cx - headerCenterX, cy - headerCenterY);
-              return { btn, distance };
+              return { btn, distance, x: cx, y: cy };
             })
             .sort((a, b) => a.distance - b.distance);
 
-          const bestButton = navButtons[0]?.btn || null;
+          const bestButton = navButtons[0] || null;
           if (!bestButton) {
             return {
               done: true,
@@ -2937,10 +2951,11 @@ async function bookEarliestAppointment(page, account) {
               headerText: chosen.headerText,
               currentMonth: chosen.month,
               currentYear: chosen.year,
+              headerDistance: Math.round(chosen.distance || 0),
             };
           }
 
-          bestButton.click();
+          bestButton.btn.click();
           return {
             done: false,
             clicked: true,
@@ -2948,6 +2963,9 @@ async function bookEarliestAppointment(page, account) {
             headerText: chosen.headerText,
             currentMonth: chosen.month,
             currentYear: chosen.year,
+            headerDistance: Math.round(chosen.distance || 0),
+            buttonDistance: Math.round(bestButton.distance || 0),
+            usedScopedButton: scopedButtons.length > 0,
           };
         }, { targetMonth, targetYear, anchorX, anchorY });
 
@@ -3043,6 +3061,10 @@ async function bookEarliestAppointment(page, account) {
       }
       
       if (targetInput) {
+        const inputRect = targetInput.getBoundingClientRect();
+        const inputX = inputRect.x + inputRect.width / 2;
+        const inputY = inputRect.y + inputRect.height / 2;
+
         // Input-group içindeki takvim ikonunu bul
         const parent = targetInput.closest(".input-group, .form-group, div");
         if (parent) {
@@ -3054,20 +3076,20 @@ async function bookEarliestAppointment(page, account) {
           );
           for (const icon of icons) {
             icon.click();
-            return { clicked: true, method: "icon", tag: icon.tagName };
+            return { clicked: true, method: "icon", tag: icon.tagName, inputX, inputY };
           }
           const addon = parent.querySelector(".input-group-addon, .input-group-btn, .input-group-append");
           if (addon) {
             addon.click();
-            return { clicked: true, method: "addon" };
+            return { clicked: true, method: "addon", inputX, inputY };
           }
         }
         targetInput.click();
         targetInput.focus();
-        return { clicked: true, method: "input_click" };
+        return { clicked: true, method: "input_click", inputX, inputY };
       }
       
-      return { clicked: false };
+      return { clicked: false, inputX: null, inputY: null };
     });
     
     console.log(`  [BOOK] Seyahat tarihi ikonu: ${JSON.stringify(travelDateIconClicked)}`);
@@ -3084,6 +3106,8 @@ async function bookEarliestAppointment(page, account) {
         await navigateVisibleCalendarToMonth({
           targetMonth: travelMonth,
           targetYear: travelYear,
+          anchorX: travelDateIconClicked?.inputX ?? null,
+          anchorY: travelDateIconClicked?.inputY ?? null,
           label: "Seyahat tarihi takvimi",
         });
       }
