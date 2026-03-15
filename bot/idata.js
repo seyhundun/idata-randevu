@@ -3053,7 +3053,7 @@ async function bookEarliestAppointment(page, account) {
       if (pageState.success) {
         startAlarm();
         await idataLog("appt_booked", `🎉 RANDEVU ALINDI! | Hesap: ${account.email}`, ssPage);
-        return { success: true, date: calDatePick.day || dateSelected?.day || "?" };
+        return { success: true, date: dateSelected?.day || "?" };
       }
 
       // ===== KREDİ KARTI SAYFASI — DUR! =====
