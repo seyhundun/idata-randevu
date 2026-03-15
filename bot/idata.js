@@ -3328,35 +3328,41 @@ async function bookEarliestAppointment(page, account) {
     if (step5Ileri.clicked) {
       await delay(3000, 5000);
       
-      // "Bir Randevu Tarihi ve Saati Seçiniz" uyarısını kontrol et
-      const warningPopup = await page.evaluate(() => {
-        const body = (document.body?.innerText || "").toLowerCase();
-        const hasWarning = body.includes("bir randevu tarihi ve saati seçiniz") || 
-                          body.includes("randevu tarihi ve saati") ||
-                          body.includes("tarih ve saat seçiniz") ||
-                          body.includes("lütfen başka bir tarih seçin") ||
-                          body.includes("başka bir tarih") ||
-                          body.includes("lütfen başka bir tarih");
-        if (hasWarning) {
-          const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button');
-          for (const btn of closeButtons) {
-            const txt = (btn.innerText || "").trim().toUpperCase();
-            if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT") { btn.click(); break; }
-          }
-          return { hasWarning: true };
-        }
-        return { hasWarning: false };
-      });
+      // "Bir Randevu Tarihi ve Saati Seçiniz" uyarısını döngüyle kontrol et — her seferinde farklı tarih/saat dene
+      const MAX_DATE_RETRIES = 10;
+      const triedDays = new Set();
+      if (dateSelected?.day) triedDays.add(dateSelected.day);
       
-      if (warningPopup.hasWarning) {
-        console.log("  [BOOK] ⚠️ 'Randevu Tarihi ve Saati Seçiniz' uyarısı tespit edildi! Farklı tarih/saat denenecek...");
+      for (let dateRetry = 0; dateRetry < MAX_DATE_RETRIES; dateRetry++) {
+        const warningPopup = await page.evaluate(() => {
+          const body = (document.body?.innerText || "").toLowerCase();
+          const hasWarning = body.includes("bir randevu tarihi ve saati seçiniz") || 
+                            body.includes("randevu tarihi ve saati") ||
+                            body.includes("tarih ve saat seçiniz") ||
+                            body.includes("lütfen başka bir tarih seçin") ||
+                            body.includes("başka bir tarih") ||
+                            body.includes("lütfen başka bir tarih");
+          if (hasWarning) {
+            const closeButtons = document.querySelectorAll('.swal2-confirm, .swal2-close, .modal .btn, button');
+            for (const btn of closeButtons) {
+              const txt = (btn.innerText || "").trim().toUpperCase();
+              if (txt === "TAMAM" || txt === "OK" || txt === "KAPAT") { btn.click(); break; }
+            }
+            return { hasWarning: true };
+          }
+          return { hasWarning: false };
+        });
+        
+        if (!warningPopup.hasWarning) {
+          console.log(`  [BOOK] ✅ Tarih/saat uyarısı yok, devam ediliyor (retry ${dateRetry})`);
+          break;
+        }
+        
+        console.log(`  [BOOK] ⚠️ Tarih/Saat uyarısı tespit edildi! Retry ${dateRetry + 1}/${MAX_DATE_RETRIES} — denenmiş günler: [${[...triedDays].join(",")}]`);
         const ssWarn = await takeScreenshotBase64(page);
-        await idataLog("appt_warning_retry", `⚠️ Tarih/Saat uyarısı! Farklı gün denenecek | Hesap: ${account.email}`, ssWarn);
+        await idataLog("appt_warning_retry", `⚠️ Tarih/Saat uyarısı! Retry ${dateRetry + 1}/${MAX_DATE_RETRIES} | Denenmiş: [${[...triedDays].join(",")}] | Hesap: ${account.email}`, ssWarn);
         
         await delay(2000, 3000);
-        
-        // Takvimi tekrar aç ve bir sonraki yeşil günü seç (önceki seçilen günü atla)
-        const previousDay = dateSelected?.day || 0;
         
         // Takvim ikonuna tekrar tıkla
         await page.evaluate(() => {
@@ -3389,8 +3395,9 @@ async function bookEarliestAppointment(page, account) {
         
         await delay(2000, 3000);
         
-        // Bir sonraki yeşil günü seç (önceki günü atla)
-        const retryDateSelected = await page.evaluate((skipDay) => {
+        // Denenmiş günleri atlayarak bir sonraki yeşil günü seç
+        const skipDaysArr = [...triedDays];
+        const retryDateSelected = await page.evaluate((skipDays) => {
           const calContainers = document.querySelectorAll(
             ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, " +
             ".datepicker-days, .flatpickr-calendar, .ui-datepicker, " +
@@ -3417,74 +3424,79 @@ async function bookEarliestAppointment(page, account) {
               allDays.push({ el: d, day: dayNum, isGreen, bgColor });
             }
           }
-          // Önceki günü atla, sonraki yeşil günleri seç
-          const greenDays = allDays.filter(d => d.isGreen && d.day !== skipDay).sort((a, b) => a.day - b.day);
-          const pool = greenDays.length > 0 ? greenDays : allDays.filter(d => d.day !== skipDay).sort((a, b) => a.day - b.day);
+          // Denenmiş günleri atla
+          const greenDays = allDays.filter(d => d.isGreen && !skipDays.includes(d.day)).sort((a, b) => a.day - b.day);
+          const pool = greenDays.length > 0 ? greenDays : allDays.filter(d => !skipDays.includes(d.day)).sort((a, b) => a.day - b.day);
           if (pool.length > 0) {
             pool[0].el.click();
-            return { selected: true, day: pool[0].day, isGreen: pool[0].isGreen, skipped: skipDay };
+            return { selected: true, day: pool[0].day, isGreen: pool[0].isGreen, remaining: pool.length - 1 };
           }
-          return { selected: false, skipped: skipDay };
-        }, previousDay);
+          return { selected: false, remaining: 0 };
+        }, skipDaysArr);
         
         console.log(`  [BOOK] Retry tarih seçimi: ${JSON.stringify(retryDateSelected)}`);
         
-        if (retryDateSelected.selected) {
-          await delay(2000, 3000);
-          
-          // Yeni saat seç
-          const retryTimeResult = await page.evaluate(() => {
-            const candidates = Array.from(document.querySelectorAll("a, button, span, div, li, label"));
-            const timeButtons = [];
-            for (const el of candidates) {
-              const text = (el.innerText || el.textContent || "").trim();
-              const timeMatch = text.match(/(\d{2}:\d{2})/);
-              if (timeMatch) {
-                const style = window.getComputedStyle(el);
-                const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
-                if (isVisible && el.offsetHeight > 10) {
-                  const bgColor = style.backgroundColor;
-                  const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-                  let isOrange = false;
-                  if (rgbMatch) {
-                    const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
-                    isOrange = r > 180 && g > 80 && b < 100;
-                  }
-                  timeButtons.push({ el, time: timeMatch[1], isOrange, bgColor });
+        if (!retryDateSelected.selected) {
+          console.log("  [BOOK] ❌ Tüm günler denendi, başka müsait gün kalmadı!");
+          await idataLog("appt_no_more_days", `❌ Tüm yeşil günler denendi, müsait gün kalmadı | Hesap: ${account.email}`, ssWarn);
+          break;
+        }
+        
+        triedDays.add(retryDateSelected.day);
+        await delay(2000, 3000);
+        
+        // Yeni saat seç
+        const retryTimeResult = await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll("a, button, span, div, li, label"));
+          const timeButtons = [];
+          for (const el of candidates) {
+            const text = (el.innerText || el.textContent || "").trim();
+            const timeMatch = text.match(/(\d{2}:\d{2})/);
+            if (timeMatch) {
+              const style = window.getComputedStyle(el);
+              const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
+              if (isVisible && el.offsetHeight > 10) {
+                const bgColor = style.backgroundColor;
+                const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                let isOrange = false;
+                if (rgbMatch) {
+                  const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
+                  isOrange = r > 180 && g > 80 && b < 100;
                 }
+                timeButtons.push({ el, time: timeMatch[1], isOrange, bgColor });
               }
             }
-            if (timeButtons.length > 0) {
-              const orangeButtons = timeButtons.filter(t => t.isOrange);
-              const target = orangeButtons.length > 0 ? orangeButtons[0] : timeButtons[0];
-              target.el.click();
-              return { clicked: true, time: target.time, isOrange: target.isOrange };
-            }
-            return { clicked: false };
+          }
+          if (timeButtons.length > 0) {
+            const orangeButtons = timeButtons.filter(t => t.isOrange);
+            const target = orangeButtons.length > 0 ? orangeButtons[0] : timeButtons[0];
+            target.el.click();
+            return { clicked: true, time: target.time, isOrange: target.isOrange };
+          }
+          return { clicked: false };
+        });
+        
+        console.log(`  [BOOK] Retry saat seçimi: ${JSON.stringify(retryTimeResult)}`);
+        await delay(2000, 3000);
+        
+        const ssRetry = await takeScreenshotBase64(page);
+        await idataLog("appt_retry_date_time", `🔄 Retry ${dateRetry + 1} | Gün ${retryDateSelected.day} | Saat: ${retryTimeResult.clicked ? retryTimeResult.time : "seçilemedi"} | Kalan: ${retryDateSelected.remaining} | Hesap: ${account.email}`, ssRetry);
+        
+        // İLERİ'ye tekrar tıkla
+        await page.evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'));
+          const ileriBtn = candidates.find(el => {
+            const txt = (el.innerText || el.value || el.textContent || "").trim().toUpperCase();
+            return txt === "İLERİ" || txt === "ILERI";
           });
-          
-          console.log(`  [BOOK] Retry saat seçimi: ${JSON.stringify(retryTimeResult)}`);
-          await delay(2000, 3000);
-          
-          const ssRetry = await takeScreenshotBase64(page);
-          await idataLog("appt_retry_date_time", `🔄 Yeni tarih: Gün ${retryDateSelected.day} | Saat: ${retryTimeResult.clicked ? retryTimeResult.time : "seçilemedi"} | Hesap: ${account.email}`, ssRetry);
-          
-          // İLERİ'ye tekrar tıkla
-          await page.evaluate(() => {
-            const candidates = Array.from(document.querySelectorAll('a, button, input[type="submit"], input[type="button"]'));
-            const ileriBtn = candidates.find(el => {
-              const txt = (el.innerText || el.value || el.textContent || "").trim().toUpperCase();
-              return txt === "İLERİ" || txt === "ILERI";
-            });
-            if (ileriBtn) ileriBtn.click();
-            else {
-              const greenBtn = document.querySelector('.btn-success, a.btn-success');
-              if (greenBtn) greenBtn.click();
-            }
-          });
-          
-          await delay(3000, 5000);
-        }
+          if (ileriBtn) ileriBtn.click();
+          else {
+            const greenBtn = document.querySelector('.btn-success, a.btn-success');
+            if (greenBtn) greenBtn.click();
+          }
+        });
+        
+        await delay(3000, 5000);
       }
       
       // Normal popup kontrolü (diğer uyarılar)
