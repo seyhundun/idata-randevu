@@ -3006,9 +3006,9 @@ async function bookEarliestAppointment(page, account) {
 
     // ===== STEP 2: TARİH sayfası — "Randevu Tarihinizi Seçiniz" takvim ikonuna tıkla =====
     console.log("  [BOOK] Step 2: TARİH sayfası — 'Randevu Tarihinizi Seçiniz' takvim ikonu aranıyor...");
-    
-    // Sayfadaki input-group'ları tara, randevu tarih input'unu kesin hedefle
-    const calIconClicked = await page.evaluate(() => {
+
+    // Randevu tarih inputunu puanla: seyahat alanını dışla, alt inputu (daha büyük Y) önceliklendir.
+    const calIconProbe = await page.evaluate(() => {
       const inputs = Array.from(document.querySelectorAll("input"));
 
       const isVisible = (el) => {
@@ -3017,129 +3017,182 @@ async function bookEarliestAppointment(page, account) {
         return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
       };
 
-      // 0) "Randevu Tarihinizi Seçiniz" placeholder'lı VEYA değeri BOŞ olan date input'u
-      //    (Değeri dolu olan seyahat tarihi inputunu ATLIYORUZ)
-      let targetInput = null;
+      const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+      const apptWords = ["randevu", "appointment", "slot", "tarih"];
 
-      // Tüm date input'larını topla
-      const dateInputs = inputs.filter(inp => {
-        if (!isVisible(inp)) return false;
-        const cls = (inp.className || "").toLowerCase();
-        return cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker");
-      });
+      const hasWord = (txt, words) => words.some((w) => txt.includes(w));
 
-      // Seyahat ile ilgili olanları filtrele, kalanlardan randevu inputunu seç
-      const nonTravelDateInputs = dateInputs.filter(inp => {
-        const ph = (inp.placeholder || "").toLowerCase();
-        const name = (inp.name || "").toLowerCase();
-        const id = (inp.id || "").toLowerCase();
-        // Seyahat/gidiş/travel ile ilgili olanları dışla
-        const isTravelField = ph.includes("seyahat") || ph.includes("gidiş") || ph.includes("travel") ||
-                              name.includes("seyahat") || name.includes("travel") || name.includes("flight") ||
-                              id.includes("seyahat") || id.includes("travel") || id.includes("flight");
-        return !isTravelField;
-      });
+      const getLabelText = (inp) => {
+        const byFor = inp.id ? document.querySelector(`label[for='${inp.id}']`) : null;
+        if (byFor) return (byFor.innerText || byFor.textContent || "").toLowerCase();
+        const wrap = inp.closest(".form-group, .input-group, .row, .col-md-6, .col-sm-6, div");
+        if (!wrap) return "";
+        const lbl = wrap.querySelector("label");
+        return lbl ? (lbl.innerText || lbl.textContent || "").toLowerCase() : "";
+      };
 
-      // Seyahat dışı date input varsa onu kullan (randevu inputu), yoksa boş değerli olanı seç
-      if (nonTravelDateInputs.length > 0) {
-        targetInput = nonTravelDateInputs[0];
-      } else {
-        // Fallback: değeri boş olan date input
-        targetInput = dateInputs.find(inp => !(inp.value || "").trim());
-      }
-
-      // 1) "Randevu Tarihinizi Seçiniz" placeholder'lı input
-      if (!targetInput) {
-        targetInput = inputs.find(inp => {
-          if (!isVisible(inp)) return false;
+      const dateCandidates = inputs
+        .filter(isVisible)
+        .map((inp) => {
           const ph = (inp.placeholder || "").toLowerCase();
-          return ph.includes("randevu tarih") || ph.includes("randevu tarihinizi");
-        });
-      }
-
-      // 2) Fallback: "tarih" içeren ama "seyahat" olmayan, date class'lı input
-      if (!targetInput) {
-        targetInput = inputs.find(inp => {
-          if (!isVisible(inp)) return false;
-          const ph = (inp.placeholder || "").toLowerCase();
+          const nm = (inp.name || "").toLowerCase();
+          const id = (inp.id || "").toLowerCase();
           const cls = (inp.className || "").toLowerCase();
-          return ph.includes("tarih") && !ph.includes("seyahat") && (cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker"));
-        });
-      }
+          const label = getLabelText(inp);
+          const blob = `${ph} ${nm} ${id} ${cls} ${label}`;
+          const rect = inp.getBoundingClientRect();
+          const val = (inp.value || "").trim();
 
-      if (targetInput) {
-        const inputRect = targetInput.getBoundingClientRect();
-        const parent = targetInput.closest(".input-group, .form-group, div");
-        if (parent) {
-          const icons = Array.from(parent.querySelectorAll(
-            ".input-group-addon, .input-group-append, .input-group-text, " +
-            "span.glyphicon-calendar, span.fa-calendar, i.fa-calendar, " +
-            "i.glyphicon-calendar, span[class*='calendar'], i[class*='calendar'], " +
-            "button[class*='calendar'], .datepickerbutton, img[src*='calendar']"
-          ));
+          const isDateLike =
+            cls.includes("calendarinput") ||
+            cls.includes("flightdate") ||
+            cls.includes("datepicker") ||
+            ph.includes("tarih") ||
+            nm.includes("date") ||
+            nm.includes("tarih") ||
+            id.includes("date") ||
+            id.includes("tarih");
 
-          // Aynı parent'taki en sağdaki (genelde input'a ait) ikonu tıkla
-          if (icons.length > 0) {
-            const sorted = icons
-              .filter(isVisible)
-              .sort((a, b) => b.getBoundingClientRect().x - a.getBoundingClientRect().x);
-            const icon = sorted[0] || icons[0];
-            icon.click();
-            return {
-              clicked: true,
-              method: "icon_in_parent",
-              tag: icon.tagName,
-              cls: (icon.className || "").substring(0, 80),
-              inputX: inputRect.x + inputRect.width / 2,
-              inputY: inputRect.y + inputRect.height / 2,
-            };
-          }
+          if (!isDateLike) return null;
 
-          const addon = parent.querySelector(".input-group-addon, .input-group-btn, .input-group-append");
-          if (addon) {
-            addon.click();
-            return {
-              clicked: true,
-              method: "addon_click",
-              tag: addon.tagName,
-              inputX: inputRect.x + inputRect.width / 2,
-              inputY: inputRect.y + inputRect.height / 2,
-            };
-          }
+          const isTravel = hasWord(blob, travelWords);
+          const isAppointmentHint = hasWord(blob, apptWords) && !isTravel;
+
+          let score = 0;
+          if (isAppointmentHint) score += 180;
+          if (ph.includes("randevu")) score += 220;
+          if (nm.includes("randevu") || id.includes("randevu")) score += 180;
+          if (!val) score += 60;
+          if (val) score -= 40;
+          if (isTravel) score -= 300;
+          // Kullanıcının dediği gibi alt inputu önceliklendir
+          score += Math.floor(rect.y / 3);
+
+          return {
+            score,
+            rect,
+            input: inp,
+            ph,
+            nm,
+            id,
+            cls,
+            label,
+            val,
+            isTravel,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score || b.rect.y - a.rect.y);
+
+      if (!dateCandidates.length) return { found: false, clicked: false };
+
+      const chosen = dateCandidates[0];
+      const targetInput = chosen.input;
+      const inputRect = chosen.rect;
+      const inputCenterX = inputRect.x + inputRect.width / 2;
+      const inputCenterY = inputRect.y + inputRect.height / 2;
+
+      let clickTarget = { x: inputCenterX, y: inputCenterY, kind: "input" };
+
+      const parent = targetInput.closest(".input-group, .form-group, div");
+      if (parent) {
+        const icons = Array.from(parent.querySelectorAll(
+          ".input-group-addon, .input-group-append, .input-group-text, " +
+          "span.glyphicon-calendar, span.fa-calendar, i.fa-calendar, " +
+          "i.glyphicon-calendar, span[class*='calendar'], i[class*='calendar'], " +
+          "button[class*='calendar'], .datepickerbutton, img[src*='calendar']"
+        )).filter(isVisible);
+
+        if (icons.length > 0) {
+          const scoredIcons = icons
+            .map((icon) => {
+              const r = icon.getBoundingClientRect();
+              const cx = r.x + r.width / 2;
+              const cy = r.y + r.height / 2;
+              const dx = Math.abs(cx - (inputRect.x + inputRect.width));
+              const dy = Math.abs(cy - inputCenterY);
+              const score = (cx >= inputRect.x ? 90 : 0) - dx - dy * 2;
+              return { icon, cx, cy, score };
+            })
+            .sort((a, b) => b.score - a.score);
+
+          const best = scoredIcons[0];
+          if (best) clickTarget = { x: best.cx, y: best.cy, kind: "icon" };
         }
-
-        targetInput.click();
-        targetInput.focus();
-        return {
-          clicked: true,
-          method: "input_click",
-          inputX: inputRect.x + inputRect.width / 2,
-          inputY: inputRect.y + inputRect.height / 2,
-        };
       }
 
-      // 3) Son fallback: tüm takvim ikonlarından SONUNCU olanı dene (ilk ikon seyahat alanı olabiliyor)
-      const allIcons = Array.from(document.querySelectorAll(
-        ".glyphicon-calendar, .fa-calendar, [class*='calendar'], " +
-        ".input-group-addon, img[src*='calendar']"
-      )).filter(isVisible);
+      window.__idataApptInputHint = {
+        id: targetInput.id || "",
+        name: targetInput.name || "",
+        placeholder: targetInput.placeholder || "",
+        y: inputRect.y,
+      };
 
-      if (allIcons.length > 0) {
-        const last = allIcons[allIcons.length - 1];
-        const rect = last.getBoundingClientRect();
-        last.click();
-        return {
-          clicked: true,
-          method: "last_icon",
-          tag: last.tagName,
-          totalIcons: allIcons.length,
-          inputX: rect.x + rect.width / 2,
-          inputY: rect.y + rect.height / 2,
-        };
-      }
-
-      return { clicked: false };
+      return {
+        found: true,
+        clicked: false,
+        selectedInput: {
+          id: chosen.id,
+          name: chosen.nm,
+          placeholder: chosen.ph,
+          label: chosen.label,
+          value: chosen.val,
+          y: Math.round(chosen.rect.y),
+          score: chosen.score,
+          isTravel: chosen.isTravel,
+        },
+        clickTarget,
+        inputX: inputCenterX,
+        inputY: inputCenterY,
+      };
     });
+
+    console.log(`  [BOOK] Takvim input adayı: ${JSON.stringify(calIconProbe.selectedInput || calIconProbe)}`);
+
+    let calIconClicked = {
+      clicked: false,
+      inputX: calIconProbe?.inputX ?? null,
+      inputY: calIconProbe?.inputY ?? null,
+    };
+
+    if (calIconProbe.found && calIconProbe.clickTarget) {
+      try {
+        await humanClick(page, calIconProbe.clickTarget.x, calIconProbe.clickTarget.y, { preMovesNear: true });
+        calIconClicked = {
+          clicked: true,
+          method: `human_${calIconProbe.clickTarget.kind}`,
+          inputX: calIconProbe.inputX,
+          inputY: calIconProbe.inputY,
+        };
+      } catch (mouseErr) {
+        console.log(`  [BOOK] Takvim ikonu humanClick hata: ${mouseErr.message}`);
+      }
+    }
+
+    if (!calIconClicked.clicked && calIconProbe.found && calIconProbe.clickTarget) {
+      const domFallback = await page.evaluate((target) => {
+        const el = document.elementFromPoint(target.x, target.y);
+        if (!el) return { clicked: false };
+
+        el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, clientX: target.x, clientY: target.y }));
+        if (typeof el.click === "function") el.click();
+
+        return { clicked: true, tag: el.tagName, cls: (el.className || "").substring(0, 80) };
+      }, calIconProbe.clickTarget);
+
+      if (domFallback.clicked) {
+        calIconClicked = {
+          clicked: true,
+          method: `dom_${calIconProbe.clickTarget.kind}`,
+          tag: domFallback.tag,
+          inputX: calIconProbe.inputX,
+          inputY: calIconProbe.inputY,
+        };
+      }
+    }
 
     console.log(`  [BOOK] Takvim ikonu: ${JSON.stringify(calIconClicked)}`);
     await delay(2000, 3000);
@@ -3362,18 +3415,67 @@ async function bookEarliestAppointment(page, account) {
             }
           }
           // Date input değeri gerçekten seçilen günü yansıtıyor mu kontrol et
-          // iDATA uses .calendarinput and .flightDate classes
-          const dateInputs = document.querySelectorAll(
+          // ÖNEMLİ: Seyahat alanını dışla, yalnızca randevu inputunu doğrula
+          const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+          const hasTravelWord = (txt) => travelWords.some((w) => txt.includes(w));
+
+          const allDateInputs = Array.from(document.querySelectorAll(
             "input[data-provide='datepicker'], input.datepicker, input.calendarinput, input.flightDate, " +
             "input[name*='date' i], input[name*='tarih' i], input[placeholder*='Tarih' i], input[placeholder*='tarih' i]"
-          );
-          for (const inp of dateInputs) {
+          ));
+
+          const nonTravelInputs = allDateInputs.filter((inp) => {
+            const blob = `${(inp.placeholder || "")} ${(inp.name || "")} ${(inp.id || "")}`.toLowerCase();
+            return !hasTravelWord(blob);
+          });
+
+          const hint = window.__idataApptInputHint || null;
+          let targetInput = null;
+
+          if (hint?.id) {
+            targetInput = nonTravelInputs.find((inp) => (inp.id || "") === hint.id) || null;
+          }
+
+          if (!targetInput && hint?.name) {
+            targetInput = nonTravelInputs.find((inp) => (inp.name || "") === hint.name) || null;
+          }
+
+          if (!targetInput && hint?.placeholder) {
+            const ph = (hint.placeholder || "").toLowerCase();
+            targetInput = nonTravelInputs.find((inp) => (inp.placeholder || "").toLowerCase() === ph) || null;
+          }
+
+          if (!targetInput && hint?.y != null && nonTravelInputs.length > 0) {
+            targetInput = nonTravelInputs
+              .map((inp) => {
+                const r = inp.getBoundingClientRect();
+                return { inp, dy: Math.abs(r.y - hint.y) };
+              })
+              .sort((a, b) => a.dy - b.dy)[0]?.inp || null;
+          }
+
+          const parsePickedDay = (val) => {
+            const dayMatch = val.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/) || val.match(/(\d{1,2})/);
+            return dayMatch ? parseInt(dayMatch[1]) : NaN;
+          };
+
+          if (targetInput) {
+            const v = (targetInput.value || "").trim();
+            if (v) {
+              const pickedDay = parsePickedDay(v);
+              if (!Number.isNaN(pickedDay) && pickedDay === dayNum) {
+                return { isActive: true, cls: "appt-input-matched-day: " + v };
+              }
+            }
+          }
+
+          // Fallback: seyahat dışı herhangi bir date input hedef günü tutuyorsa aktif say
+          for (const inp of nonTravelInputs) {
             const v = (inp.value || "").trim();
             if (!v) continue;
-            const dayMatch = v.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/) || v.match(/(\d{1,2})/);
-            const pickedDay = dayMatch ? parseInt(dayMatch[1]) : NaN;
+            const pickedDay = parsePickedDay(v);
             if (!Number.isNaN(pickedDay) && pickedDay === dayNum) {
-              return { isActive: true, cls: "input-matched-day: " + v };
+              return { isActive: true, cls: "non-travel-input-matched-day: " + v };
             }
           }
           return { isActive: false, cls: "" };
@@ -3681,43 +3783,73 @@ async function bookEarliestAppointment(page, account) {
         dateStr = `${String(futureDate.getDate()).padStart(2, "0")}-${String(futureDate.getMonth() + 1).padStart(2, "0")}-${futureDate.getFullYear()}`;
       }
 
-      await page.evaluate((val, dayNum) => {
+      await page.evaluate((val) => {
         const inputs = Array.from(document.querySelectorAll("input"));
-        const dateInput = inputs.find(inp => {
-          const cls = (inp.className || "").toLowerCase();
-          return cls.includes("calendarinput") || cls.includes("flightdate");
-        }) || inputs.find(inp => {
-          const ph = (inp.placeholder || "").toLowerCase();
-          const nm = (inp.name || "").toLowerCase();
-          return ph.includes("randevu") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
-        });
-        if (dateInput) {
-          // iDATA için ana format her zaman tire
-          const finalVal = val;
-          
-          dateInput.value = "";
-          dateInput.focus();
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-          nativeSetter.call(dateInput, finalVal);
-          dateInput.dispatchEvent(new Event("input", { bubbles: true }));
-          dateInput.dispatchEvent(new Event("change", { bubbles: true }));
-          dateInput.dispatchEvent(new Event("blur", { bubbles: true }));
-          if (typeof window.jQuery !== "undefined") {
+        const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+        const apptWords = ["randevu", "appointment", "slot", "tarih"];
+        const hasWord = (txt, words) => words.some((w) => txt.includes(w));
+
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+
+        const candidates = inputs
+          .filter(isVisible)
+          .map((inp) => {
+            const ph = (inp.placeholder || "").toLowerCase();
+            const nm = (inp.name || "").toLowerCase();
+            const id = (inp.id || "").toLowerCase();
+            const cls = (inp.className || "").toLowerCase();
+            const blob = `${ph} ${nm} ${id} ${cls}`;
+
+            const isDateLike = cls.includes("calendarinput") || cls.includes("flightdate") || cls.includes("datepicker") || ph.includes("tarih") || nm.includes("date") || nm.includes("tarih");
+            if (!isDateLike) return null;
+
+            const isTravel = hasWord(blob, travelWords);
+            const isAppt = hasWord(blob, apptWords) && !isTravel;
+            const rect = inp.getBoundingClientRect();
+
+            let score = 0;
+            if (isAppt) score += 180;
+            if (ph.includes("randevu")) score += 220;
+            if (nm.includes("randevu") || id.includes("randevu")) score += 180;
+            if (isTravel) score -= 300;
+            if (!(inp.value || "").trim()) score += 60;
+            score += Math.floor(rect.y / 3);
+
+            return { inp, score, y: rect.y };
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.score - a.score || b.y - a.y);
+
+        const dateInput = candidates[0]?.inp || null;
+        if (!dateInput) return;
+
+        const finalVal = val;
+        dateInput.value = "";
+        dateInput.focus();
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeSetter.call(dateInput, finalVal);
+        dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+        dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+        dateInput.dispatchEvent(new Event("blur", { bubbles: true }));
+
+        if (typeof window.jQuery !== "undefined") {
+          try {
+            const parts = val.split("-");
+            const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+            window.jQuery(dateInput).datepicker("setDate", dateObj);
+            window.jQuery(dateInput).trigger("changeDate").trigger("change");
+          } catch (_) {
             try {
-              // setDate ile Date objesi kullan (en güvenilir)
-              const parts = val.split("-");
-              const dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-              window.jQuery(dateInput).datepicker("setDate", dateObj);
-              window.jQuery(dateInput).trigger("changeDate").trigger("change");
-            } catch (_) {
-              try {
-                window.jQuery(dateInput).datepicker("update", finalVal);
-                window.jQuery(dateInput).trigger("changeDate");
-              } catch (__) {}
-            }
+              window.jQuery(dateInput).datepicker("update", finalVal);
+              window.jQuery(dateInput).trigger("changeDate");
+            } catch (__) {}
           }
         }
-      }, dateStr, fallbackDay);
+      }, dateStr);
       console.log(`  [BOOK] Manuel tarih girildi: ${dateStr}`);
     }
 
@@ -3729,86 +3861,128 @@ async function bookEarliestAppointment(page, account) {
     console.log("  [BOOK] Step 4: Turuncu saat butonu aranıyor...");
     await delay(2000, 3000);
 
-    // Önce saat butonlarının konumunu tespit et (sadece gerçekten tıklanabilir elemanlar)
-    const timeButtonInfo = await page.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
-      const timeButtons = [];
+    // Saat slotları bazen AJAX ile geç geliyor; birkaç tur bekleyip tekrar tara
+    const scanTimeButtons = async () => {
+      return await page.evaluate(() => {
+        const candidates = Array.from(document.querySelectorAll(
+          "button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour, li, span, div, td, label"
+        ));
 
-      for (const el of candidates) {
-        const rawText = (el.innerText || el.textContent || el.value || "").trim();
+        const normalizeTime = (txt) => {
+          const m = (txt || "").replace(/\s+/g, " ").match(/(\d{1,2}[:.]\d{2})/);
+          if (!m) return "";
+          const [h, mm] = m[1].replace(".", ":").split(":");
+          return `${String(parseInt(h, 10)).padStart(2, "0")}:${mm}`;
+        };
 
-        const style = window.getComputedStyle(el);
-        const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
-        if (!isVisible || el.offsetHeight < 10 || el.offsetWidth < 20) continue;
+        const parseMinutes = (time) => {
+          const m = (time || "").match(/^(\d{2}):(\d{2})$/);
+          if (!m) return 9999;
+          return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        };
 
-        const cls = (el.className || "").toLowerCase();
-        const tag = el.tagName;
-        const role = (el.getAttribute("role") || "").toLowerCase();
-        const isLikelyClickable = tag === "BUTTON" || tag === "A" || tag === "INPUT" || role === "button" || cls.includes("btn") || cls.includes("getdatebtnhour");
-        if (!isLikelyClickable) continue;
+        const timeButtons = [];
 
-        // Konteyner div/span yerine gerçek kontrolü hedefle
-        const childControls = Array.from(el.querySelectorAll("button, a, input"));
-        const hasNestedTimeControl = childControls.some(child => {
-          const childTxt = (child.innerText || child.textContent || child.value || "").trim();
-          return /(\d{1,2}[:.]\d{2})/.test(childTxt);
-        });
-        if (hasNestedTimeControl && tag !== "BUTTON" && tag !== "A" && tag !== "INPUT") continue;
+        for (const el of candidates) {
+          const style = window.getComputedStyle(el);
+          const isVisible = style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null;
+          if (!isVisible || el.offsetHeight < 8 || el.offsetWidth < 12) continue;
 
-        // Saat metnini daha esnek yakala: 9:30, 09:30, 09.30
-        const normalizedRawText = rawText.replace(/\s+/g, " ");
-        const parsedTime = normalizedRawText.match(/(\d{1,2}[:.]\d{2})/);
-        if (!parsedTime && !cls.includes("getdatebtnhour")) continue;
+          const cls = (el.className || "").toLowerCase();
+          const tag = el.tagName;
+          const role = (el.getAttribute("role") || "").toLowerCase();
+          const hrefSelf = el.getAttribute("href") || "";
+          const childLink = el.querySelector("a[href]");
+          const href = hrefSelf || (childLink ? (childLink.getAttribute("href") || "") : "");
+          const hasPostback = href.includes("__doPostBack");
 
-        const matchedTime = parsedTime
-          ? parsedTime[1].replace(".", ":")
-          : (el.getAttribute("data-time") || "").replace(".", ":");
-        if (!matchedTime) continue;
+          const rawText = (el.innerText || el.textContent || el.value || el.getAttribute("data-time") || el.getAttribute("title") || "").trim();
+          const matchedTime = normalizeTime(rawText);
+          if (!matchedTime) continue;
 
-        const bgColor = style.backgroundColor;
-        const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-        let isOrange = false;
-        if (rgbMatch) {
-          const r = parseInt(rgbMatch[1]), g = parseInt(rgbMatch[2]), b = parseInt(rgbMatch[3]);
-          isOrange = r > 180 && g > 80 && b < 100;
+          const childControls = Array.from(el.querySelectorAll("button, a, input"));
+          const hasNestedTimeControl = childControls.some((child) => normalizeTime(child.innerText || child.textContent || child.value || ""));
+          if (hasNestedTimeControl && tag !== "BUTTON" && tag !== "A" && tag !== "INPUT") continue;
+
+          const isLikelyClickable =
+            tag === "BUTTON" ||
+            tag === "A" ||
+            tag === "INPUT" ||
+            role === "button" ||
+            cls.includes("btn") ||
+            cls.includes("slot") ||
+            cls.includes("hour") ||
+            cls.includes("getdatebtnhour") ||
+            hasPostback;
+          if (!isLikelyClickable) continue;
+
+          const bgColor = style.backgroundColor;
+          const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+          let isOrange = false;
+          if (rgbMatch) {
+            const r = parseInt(rgbMatch[1], 10);
+            const g = parseInt(rgbMatch[2], 10);
+            const b = parseInt(rgbMatch[3], 10);
+            isOrange = r > 170 && g > 70 && g < 190 && b < 120;
+          }
+          if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("warning") || cls.includes("active") || cls.includes("getdatebtnhour") || cls.includes("slot-selected")) {
+            isOrange = true;
+          }
+
+          let postbackTarget = null;
+          let postbackArg = null;
+          const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+          if (pbMatch) {
+            postbackTarget = pbMatch[1];
+            postbackArg = pbMatch[2];
+          }
+
+          const rect = el.getBoundingClientRect();
+          timeButtons.push({
+            time: matchedTime,
+            sortMinute: parseMinutes(matchedTime),
+            isOrange,
+            bgColor,
+            tag,
+            cls: (el.className || "").substring(0, 120),
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2,
+            postbackTarget,
+            postbackArg,
+          });
         }
-        if (cls.includes("btn-warning") || cls.includes("btn-orange") || cls.includes("warning") || cls.includes("active") || cls.includes("getdatebtnhour")) isOrange = true;
 
-        const href = el.getAttribute("href") || "";
-        let postbackTarget = null, postbackArg = null;
-        const pbMatch = href.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
-        if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
-
-        const rect = el.getBoundingClientRect();
-        timeButtons.push({
-          time: matchedTime,
-          isOrange,
-          bgColor,
-          tag,
-          cls: (el.className || "").substring(0, 120),
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-          postbackTarget,
-          postbackArg,
+        const sorted = [...timeButtons].sort((a, b) => {
+          if (a.isOrange !== b.isOrange) return a.isOrange ? -1 : 1;
+          if (a.sortMinute !== b.sortMinute) return a.sortMinute - b.sortMinute;
+          return a.y - b.y;
         });
+
+        const target = sorted.length > 0 ? sorted[0] : null;
+        return {
+          found: !!target,
+          target,
+          totalSlots: timeButtons.length,
+          allSlots: sorted.slice(0, 10).map((t) => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, cls: t.cls.substring(0, 40), pb: !!t.postbackTarget })),
+        };
+      });
+    };
+
+    let timeButtonInfo = { found: false, target: null, totalSlots: 0, allSlots: [] };
+    for (let scanAttempt = 0; scanAttempt < 6; scanAttempt++) {
+      timeButtonInfo = await scanTimeButtons();
+      if (timeButtonInfo.found) break;
+
+      // Slotlar yüklenmediyse seçilen güne fiziksel tıklamayı bir kez daha tetikle
+      if (scanAttempt === 1 && dateInfo?.found) {
+        try {
+          await humanClick(page, dateInfo.x, dateInfo.y, { preMovesNear: true });
+          console.log("  [BOOK] Saat listesi için tarih tekrar tıklandı (humanClick)");
+        } catch (_) {}
       }
 
-      const sorted = [...timeButtons].sort((a, b) => {
-        if (a.isOrange !== b.isOrange) return a.isOrange ? -1 : 1;
-        const aPreferred = /getdatebtnhour|btn-warning|btn/.test(a.cls.toLowerCase());
-        const bPreferred = /getdatebtnhour|btn-warning|btn/.test(b.cls.toLowerCase());
-        if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
-        return 0;
-      });
-
-      const target = sorted.length > 0 ? sorted[0] : null;
-      return {
-        found: !!target,
-        target,
-        totalSlots: timeButtons.length,
-        allSlots: timeButtons.map(t => ({ time: t.time, isOrange: t.isOrange, tag: t.tag, cls: t.cls.substring(0, 40), pb: !!t.postbackTarget })),
-      };
-    });
+      await delay(700, 1200);
+    }
 
     console.log(`  [BOOK] Saat butonları: ${JSON.stringify(timeButtonInfo)}`);
 
@@ -3822,10 +3996,12 @@ async function bookEarliestAppointment(page, account) {
         return await page.evaluate((targetTime) => {
           const normalizeTime = (txt) => {
             const m = (txt || "").replace(/\s+/g, " ").match(/(\d{1,2}[:.]\d{2})/);
-            return m ? m[1].replace(".", ":") : "";
+            if (!m) return "";
+            const [h, mm] = m[1].replace(".", ":").split(":");
+            return `${String(parseInt(h, 10)).padStart(2, "0")}:${mm}`;
           };
 
-          const controls = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour"));
+          const controls = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit'], [role='button'], .getdatebtnhour, li, span, div, td, label"));
           for (const el of controls) {
             const txt = (el.innerText || el.textContent || el.value || "").trim();
             const normalizedTextTime = normalizeTime(txt);
@@ -3843,10 +4019,19 @@ async function bookEarliestAppointment(page, account) {
               cls.includes("selected") ||
               cls.includes("checked") ||
               cls.includes("btn-success") ||
+              cls.includes("btn-warning") ||
+              cls.includes("slot-selected") ||
               ariaPressed === "true";
 
-            return { isActive, cls: (el.className || "").substring(0, 100), bg };
+            if (isActive) return { isActive: true, cls: (el.className || "").substring(0, 100), bg };
           }
+
+          // Sağ özet panelde "Saat: 09:30" gibi metin görünüyorsa seçimi başarılı say
+          const pageText = (document.body?.innerText || "").replace(/\s+/g, " ");
+          if (pageText.includes(`Saat: ${targetTime}`) || pageText.includes(`Saat : ${targetTime}`)) {
+            return { isActive: true, cls: "summary-time-matched", bg: "" };
+          }
+
           return { isActive: false, cls: "", bg: "" };
         }, t.time);
       };
