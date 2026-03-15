@@ -4126,8 +4126,12 @@ async function mainLoop() {
                 const bookResult = await bookEarliestAppointment(page, account);
                 
                 if (bookResult.success) {
-                  console.log(`  🎉 RANDEVU ALINDI! Tarih: ${bookResult.date}`);
-                  await idataLog("appt_booked", `🎉 RANDEVU BAŞARIYLA ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`);
+                  console.log(`  🎉 RANDEVU BULUNDU ve İLERLENDİ! Tarih: ${bookResult.date}`);
+                  const logStatus = bookResult.needsPayment ? "appt_payment_page" : "appt_booked";
+                  const logMsg = bookResult.needsPayment 
+                    ? `💳 ÖDEME SAYFASINA ULAŞILDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`
+                    : `🎉 ÖDEME BAŞARILI — RANDEVU ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`;
+                  await idataLog(logStatus, logMsg);
                   // Tarayıcıyı açık tut — kullanıcı fark edene kadar bekle
                   console.log("  🔒 Tarayıcı açık kalacak — randevu alındı! 5 dakika bekleniyor...");
                   await delay(300000, 300000); // 5 dakika bekle
