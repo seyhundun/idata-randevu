@@ -3047,7 +3047,8 @@ async function bookEarliestAppointment(page, account) {
       if (pool.length > 0) {
         let target = null;
         if (tDay) target = pool.find(d => d.day === tDay);
-        if (!target) target = pool[0];
+        // İlk yeşil gün yerine bir sonraki (2.) yeşil günü seç (varsa)
+        if (!target) target = pool.length > 1 ? pool[1] : pool[0];
         return { 
           found: true, day: target.day, isGreen: target.isGreen,
           x: target.x, y: target.y,
