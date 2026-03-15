@@ -65,6 +65,7 @@ interface IdataAccount {
   otp_requested_at: string | null;
   registration_otp: string | null;
   registration_otp_type: string | null;
+  booking_enabled: boolean;
 }
 
 interface CityOffice {
