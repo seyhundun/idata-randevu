@@ -63,7 +63,7 @@ export default function BotSettingsPanel() {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
-  const loadData = () => { loadCountries(); loadSettings(); loadCurrentIp(); };
+  const loadData = () => { loadCountries(); loadSettings(); };
 
   const loadCountries = async () => {
     const { data } = await supabase.from("vfs_countries").select("*").order("sort_order");
