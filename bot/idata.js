@@ -3921,10 +3921,9 @@ async function bookEarliestAppointment(page, account) {
           }
           const greenDays = allDays.filter(d => d.isGreen).sort((a, b) => a.day - b.day);
           const pool = greenDays.length > 0 ? greenDays : allDays;
-          // Rastgele yeşil gün seç (her seferinde farklı denemek için)
+          // İlk yeşili değil, bir sonrakini (2. uygun gün) seç
           if (pool.length > 0) {
-            const idx = Math.floor(Math.random() * pool.length);
-            const target = pool[idx];
+            const target = pool.length > 1 ? pool[1] : pool[0];
             return { found: true, day: target.day, x: target.x, y: target.y, greenCount: greenDays.length, postbackTarget: target.postbackTarget, postbackArg: target.postbackArg, hasLink: target.hasLink };
           }
           return { found: false };
