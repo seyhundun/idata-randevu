@@ -3670,7 +3670,7 @@ async function bookEarliestAppointment(page, account) {
       // ===== Başarılı =====
       if (pageState.success) {
         startAlarm();
-        await idataLog("appt_booked", `🎉 RANDEVU ALINDI! | Hesap: ${account.email}`, ssPage);
+        await idataLog("appt_booked", `🎉 ÖDEME BAŞARILI — RANDEVU ALINDI! | Hesap: ${account.email}`, ssPage);
         return { success: true, date: dateSelected?.day || "?" };
       }
 
@@ -4126,8 +4126,12 @@ async function mainLoop() {
                 const bookResult = await bookEarliestAppointment(page, account);
                 
                 if (bookResult.success) {
-                  console.log(`  🎉 RANDEVU ALINDI! Tarih: ${bookResult.date}`);
-                  await idataLog("appt_booked", `🎉 RANDEVU BAŞARIYLA ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`);
+                  console.log(`  🎉 RANDEVU BULUNDU ve İLERLENDİ! Tarih: ${bookResult.date}`);
+                  const logStatus = bookResult.needsPayment ? "appt_payment_page" : "appt_booked";
+                  const logMsg = bookResult.needsPayment 
+                    ? `💳 ÖDEME SAYFASINA ULAŞILDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`
+                    : `🎉 ÖDEME BAŞARILI — RANDEVU ALINDI! | Tarih: ${bookResult.date} | Hesap: ${account.email}`;
+                  await idataLog(logStatus, logMsg);
                   // Tarayıcıyı açık tut — kullanıcı fark edene kadar bekle
                   console.log("  🔒 Tarayıcı açık kalacak — randevu alındı! 5 dakika bekleniyor...");
                   await delay(300000, 300000); // 5 dakika bekle
@@ -4145,7 +4149,11 @@ async function mainLoop() {
                       const retryBook = await bookEarliestAppointment(page, account);
                       if (retryBook.success) {
                         console.log(`  🎉 RANDEVU ALINDI (retry)! Tarih: ${retryBook.date}`);
-                        await idataLog("appt_booked", `🎉 RANDEVU ALINDI (retry)! | Tarih: ${retryBook.date} | Hesap: ${account.email}`);
+                        const retryLogStatus = retryBook.needsPayment ? "appt_payment_page" : "appt_booked";
+                        const retryLogMsg = retryBook.needsPayment
+                          ? `💳 ÖDEME SAYFASINA ULAŞILDI (retry)! | Tarih: ${retryBook.date} | Hesap: ${account.email}`
+                          : `🎉 ÖDEME BAŞARILI — RANDEVU ALINDI (retry)! | Tarih: ${retryBook.date} | Hesap: ${account.email}`;
+                        await idataLog(retryLogStatus, retryLogMsg);
                         console.log("  🔒 Tarayıcı açık kalacak — 5 dakika bekleniyor...");
                         await delay(300000, 300000);
                         break;
