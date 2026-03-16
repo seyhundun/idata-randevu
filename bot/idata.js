@@ -1282,6 +1282,96 @@ async function launchBrowser(ip = null) {
   return { browser, page };
 }
 
+// ==================== HUMAN WARMUP ====================
+// Cloudflare'ı atlatmak için tarayıcı açıldıktan sonra gerçek siteleri ziyaret et
+async function humanWarmup(page) {
+  const warmupSites = [
+    "https://www.google.com.tr/search?q=italya+vize+randevu",
+    "https://www.google.com.tr/search?q=idata+randevu",
+    "https://www.google.com.tr/",
+    "https://www.wikipedia.org/",
+    "https://tr.wikipedia.org/wiki/İtalya",
+    "https://www.haber7.com/",
+    "https://www.milliyet.com.tr/",
+  ];
+
+  // 2-3 rastgele site ziyaret et
+  const count = 2 + Math.floor(Math.random() * 2);
+  const shuffled = warmupSites.sort(() => Math.random() - 0.5).slice(0, count);
+
+  console.log(`  [WARMUP] 🧑 İnsan taklidi: ${count} site ziyaret edilecek...`);
+
+  for (const url of shuffled) {
+    try {
+      console.log(`  [WARMUP] → ${url.slice(0, 60)}...`);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await delay(2000, 4000);
+
+      // Rastgele mouse hareketi
+      const moveCount = 3 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < moveCount; i++) {
+        await humanMove(page);
+        await delay(300, 800);
+      }
+
+      // Scroll
+      await humanScroll(page, Math.floor(Math.random() * 600) + 200);
+      await delay(1000, 2500);
+
+      // Bazen ikinci bir scroll
+      if (Math.random() > 0.5) {
+        await humanScroll(page, Math.floor(Math.random() * 400) + 100);
+        await delay(800, 1500);
+      }
+
+      // Sayfada biraz kal
+      await delay(1500, 3500);
+    } catch (e) {
+      console.log(`  [WARMUP] ⚠ ${url.slice(0, 40)} hata: ${e.message}`);
+    }
+  }
+
+  // Son olarak Google'a git ve iDATA'yı ara (organik geçiş etkisi)
+  try {
+    console.log("  [WARMUP] → Google'da iDATA araması...");
+    await page.goto("https://www.google.com.tr/search?q=idata+italya+randevu+appointment", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    await delay(2000, 4000);
+    await humanMove(page);
+    await humanScroll(page, 300);
+    await delay(1500, 3000);
+
+    // Google sonuçlarında iDATA linkini bul ve tıkla (varsa)
+    const clicked = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a"));
+      const idataLink = links.find(a => {
+        const href = (a.href || "").toLowerCase();
+        return href.includes("idata.com.tr") && !href.includes("google");
+      });
+      if (idataLink) {
+        idataLink.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (clicked) {
+      console.log("  [WARMUP] ✅ Google'dan iDATA'ya organik geçiş yapıldı!");
+      await delay(3000, 5000);
+      // CF challenge varsa bekle
+      const cfResult = await waitCloudflareBypass(page, "warmup_organic", 30000);
+      if (cfResult.ok) {
+        console.log("  [WARMUP] ✅ Organik geçiş başarılı, CF geçildi");
+      }
+    } else {
+      console.log("  [WARMUP] Google sonuçlarında iDATA bulunamadı, direkt gidilecek");
+    }
+  } catch (e) {
+    console.log(`  [WARMUP] Google arama hatası: ${e.message}`);
+  }
+
+  console.log("  [WARMUP] ✅ İnsan taklidi tamamlandı");
+}
+
 // ==================== DROPDOWN HELPER ====================
 async function selectDropdownOption(page, dropdownSelector, optionText) {
   try {
