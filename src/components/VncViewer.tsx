@@ -13,9 +13,9 @@ interface VncViewerProps {
   className?: string;
 }
 
-const VncViewer = ({ title, defaultHost = "vnc.fipacomputer.online", pathPrefix = "/vfs", className }: VncViewerProps) => {
+const VncViewer = ({ title, defaultHost = "85.235.75.101:6081", pathPrefix = "/idata", className }: VncViewerProps) => {
   const [host, setHost] = useState(defaultHost);
-  const [scheme, setScheme] = useState<"http" | "https">("https");
+  const [scheme, setScheme] = useState<"http" | "https">("http");
   const [isConnected, setIsConnected] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
