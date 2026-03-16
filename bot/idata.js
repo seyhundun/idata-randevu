@@ -633,7 +633,7 @@ async function signalCfBlocked(ip) {
 // CF retry isteği var mı kontrol et
 async function checkCfRetryRequested() {
   try {
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     const res = await fetch(`${supabaseUrl}/rest/v1/idata_config?select=cf_retry_requested&limit=1`, {
       method: "GET",
       headers: apiHeaders,
