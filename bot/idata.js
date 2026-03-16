@@ -657,7 +657,7 @@ async function checkCfRetryRequested() {
 // CF blocked durumunu temizle
 async function clearCfBlocked() {
   try {
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
       method: "PATCH",
       headers: { ...apiHeaders, "Prefer": "return=minimal" },
