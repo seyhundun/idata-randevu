@@ -611,7 +611,7 @@ async function signalCfBlocked(ip) {
   try {
     await fetch(CONFIG.API_URL + "/idata", { method: "GET", headers: apiHeaders }); // config'i al
     // Doğrudan Supabase REST API ile güncelle
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
       method: "PATCH",
       headers: {
