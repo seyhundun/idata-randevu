@@ -5176,6 +5176,9 @@ async function mainLoop() {
             await idataLog("login_start", `Giriş: ${account.email} | IP: ${proxyLabel} | Bölge: ${EVOMI_PROXY_REGION || 'yok'} | Deneme: ${attempt}/3`);
             ({ browser, page } = await launchBrowser(ip));
             
+            // 🧑 İnsan taklidi — CF'yi atlatmak için önce normal siteler ziyaret et
+            await humanWarmup(page);
+            
             const loginResult = await loginToIdata(page, account);
             if (loginResult.success) {
               allCfBlocked = false;
