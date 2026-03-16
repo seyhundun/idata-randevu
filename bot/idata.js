@@ -7,9 +7,8 @@
 require("dotenv").config();
 
 // ==================== CONFIG ====================
-const PROJECT_REF = process.env.VITE_SUPABASE_PROJECT_ID || "lioqcdnpcufbaihkzhct";
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || `https://${PROJECT_REF}.supabase.co`;
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxpb3FjZG5wY3VmYmFpaGt6aGN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NTE2NjEsImV4cCI6MjA4OTIyNzY2MX0.MVil0ms9SFplMwjuyMYMFvuyT_s2yUzJ4f4dmgtnbvg";
+const SUPABASE_URL = process.env.SUPABASE_URL || "https://lioqcdnpcufbaihkzhct.supabase.co";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxpb3FjZG5wY3VmYmFpaGt6aGN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NTE2NjEsImV4cCI6MjA4OTIyNzY2MX0.MVil0ms9SFplMwjuyMYMFvuyT_s2yUzJ4f4dmgtnbvg";
 const CONFIG = {
   API_URL: `${SUPABASE_URL}/functions/v1/bot-api`,
   API_KEY: SUPABASE_ANON_KEY,
