@@ -3422,6 +3422,10 @@ async function bookEarliestAppointment(page, account) {
     }
 
     console.log(`  [BOOK] Takvim ikonu: ${JSON.stringify(calIconClicked)}`);
+    await page.evaluate((anchorX, anchorY) => {
+      window.__idataApptAnchorX = anchorX;
+      window.__idataApptAnchorY = anchorY;
+    }, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null).catch(() => {});
     await delay(2000, 3000);
 
     // ===== STEP 3: Takvimden sadece YEŞİL ve en erken günü seç =====
@@ -3684,7 +3688,8 @@ async function bookEarliestAppointment(page, account) {
       console.log(`  [BOOK] Tarih bilgisi: hasLink=${dateInfo.hasLink} postbackTarget=${dateInfo.postbackTarget} linkHref=${dateInfo.linkHref}`);
 
       const verifyDateSelection = async () => {
-        return await page.evaluate((dayNum, targetNormalized) => {
+        return await page.evaluate((dayNum, targetNormalized, anchorX, anchorY) => {
+          const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
           const normalizeDateValue = (val) => {
             const raw = String(val || "").trim();
             if (!raw) return null;
@@ -3710,9 +3715,50 @@ async function bookEarliestAppointment(page, account) {
             return dayMatch ? parseInt(dayMatch[1], 10) : NaN;
           };
 
-          const calContainers = document.querySelectorAll("[class*='datepicker'], [class*='calendar'], table.table-condensed, .datepicker-days table");
-          for (const cal of calContainers) {
-            const tds = cal.querySelectorAll("td");
+          const isVisible = (el) => {
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+          };
+
+          const findCalendarRoot = (startNode) => {
+            let node = startNode;
+            let best = null;
+            let depth = 0;
+            while (node && node !== document.body && depth < 8) {
+              if (node.matches?.(calendarSelector) && isVisible(node)) {
+                const rect = node.getBoundingClientRect();
+                const dayCount = node.querySelectorAll?.("td").length || 0;
+                if (rect.width >= 140 && rect.height >= 120 && dayCount >= 20) best = node;
+              }
+              node = node.parentElement;
+              depth += 1;
+            }
+            return best;
+          };
+
+          const calendarRoots = Array.from(document.querySelectorAll(calendarSelector))
+            .map((node) => findCalendarRoot(node) || node)
+            .filter((node, idx, arr) => node && isVisible(node) && arr.indexOf(node) === idx);
+
+          const scopedCalendar = calendarRoots
+            .map((cal) => {
+              const rect = cal.getBoundingClientRect();
+              const centerX = rect.x + rect.width / 2;
+              const centerY = rect.y + rect.height / 2;
+              const distance = (anchorX != null && anchorY != null)
+                ? Math.hypot(centerX - anchorX, centerY - anchorY)
+                : 9999;
+              const insideX = anchorX != null && anchorX >= rect.x - 24 && anchorX <= rect.x + rect.width + 24;
+              const belowAnchor = anchorY != null ? rect.y >= anchorY - 90 : true;
+              const score = (insideX ? 220 : -Math.min(220, Math.abs(centerX - (anchorX ?? centerX)))) + (belowAnchor ? 180 : -260) - Math.round(distance);
+              return { cal, score, distance };
+            })
+            .sort((a, b) => b.score - a.score || a.distance - b.distance)[0]?.cal || null;
+
+          if (scopedCalendar) {
+            const tds = scopedCalendar.querySelectorAll("td");
             for (const d of tds) {
               const text = (d.innerText || d.textContent || "").trim();
               if (parseInt(text, 10) === dayNum) {
@@ -3740,19 +3786,12 @@ async function bookEarliestAppointment(page, account) {
           const hint = window.__idataApptInputHint || null;
           let targetInput = null;
 
-          if (hint?.id) {
-            targetInput = nonTravelInputs.find((inp) => (inp.id || "") === hint.id) || null;
-          }
-
-          if (!targetInput && hint?.name) {
-            targetInput = nonTravelInputs.find((inp) => (inp.name || "") === hint.name) || null;
-          }
-
+          if (hint?.id) targetInput = nonTravelInputs.find((inp) => (inp.id || "") === hint.id) || null;
+          if (!targetInput && hint?.name) targetInput = nonTravelInputs.find((inp) => (inp.name || "") === hint.name) || null;
           if (!targetInput && hint?.placeholder) {
             const ph = (hint.placeholder || "").toLowerCase();
             targetInput = nonTravelInputs.find((inp) => (inp.placeholder || "").toLowerCase() === ph) || null;
           }
-
           if (!targetInput && hint?.y != null && nonTravelInputs.length > 0) {
             targetInput = nonTravelInputs
               .map((inp) => {
@@ -3766,13 +3805,9 @@ async function bookEarliestAppointment(page, account) {
             const v = (targetInput.value || "").trim();
             if (v) {
               const normalized = normalizeDateValue(v);
-              if (targetNormalized && normalized === targetNormalized) {
-                return { isActive: true, cls: "appt-input-matched-date: " + v };
-              }
+              if (targetNormalized && normalized === targetNormalized) return { isActive: true, cls: "appt-input-matched-date: " + v };
               const pickedDay = parsePickedDay(v);
-              if (!targetNormalized && !Number.isNaN(pickedDay) && pickedDay === dayNum) {
-                return { isActive: true, cls: "appt-input-matched-day: " + v };
-              }
+              if (!targetNormalized && !Number.isNaN(pickedDay) && pickedDay === dayNum) return { isActive: true, cls: "appt-input-matched-day: " + v };
             }
           }
 
@@ -3780,16 +3815,12 @@ async function bookEarliestAppointment(page, account) {
             const v = (inp.value || "").trim();
             if (!v) continue;
             const normalized = normalizeDateValue(v);
-            if (targetNormalized && normalized === targetNormalized) {
-              return { isActive: true, cls: "non-travel-input-matched-date: " + v };
-            }
+            if (targetNormalized && normalized === targetNormalized) return { isActive: true, cls: "non-travel-input-matched-date: " + v };
             const pickedDay = parsePickedDay(v);
-            if (!targetNormalized && !Number.isNaN(pickedDay) && pickedDay === dayNum) {
-              return { isActive: true, cls: "non-travel-input-matched-day: " + v };
-            }
+            if (!targetNormalized && !Number.isNaN(pickedDay) && pickedDay === dayNum) return { isActive: true, cls: "non-travel-input-matched-day: " + v };
           }
           return { isActive: false, cls: "" };
-        }, dateInfo.day, dateInfo.normalizedDate || null);
+        }, dateInfo.day, dateInfo.normalizedDate || null, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null);
       };
 
       // === DeepSeek simulateRealClick: tam mouse event chain ===
@@ -3814,9 +3845,9 @@ async function bookEarliestAppointment(page, account) {
       };
 
       // === DeepSeek forceDateSelection: datepicker internal state manipülasyonu ===
-      const forceDateSelectionInternal = async (dayNum) => {
-        return await page.evaluate((d) => {
-          // Tüm potansiyel datepicker input'larını bul (RANDEVU alanını önceliklendir)
+      const forceDateSelectionInternal = async (dayNum, targetNormalized = null) => {
+        return await page.evaluate((d, expectedNormalized) => {
+          const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
           const inputList = Array.from(document.querySelectorAll("input.calendarinput, input.flightDate, input[data-provide='datepicker'], input.datepicker"));
           if (!inputList.length || typeof window.jQuery === "undefined") return { success: false, reason: "no_inputs_or_jquery" };
 
@@ -3826,104 +3857,130 @@ async function bookEarliestAppointment(page, account) {
             return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
           };
 
+          const hint = window.__idataApptInputHint || null;
+          const travelWords = ["seyahat", "gidiş", "gidis", "travel", "flight", "departure", "baslangic", "başlangıç"];
+          const hasTravelWord = (txt) => travelWords.some((w) => txt.includes(w));
+          const anchorX = window.__idataApptAnchorX ?? null;
+          const anchorY = window.__idataApptAnchorY ?? null;
+
+          const normalizeText = (value) => String(value || "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/ı/g, "i")
+            .replace(/ğ/g, "g")
+            .replace(/ş/g, "s")
+            .replace(/ü/g, "u")
+            .replace(/ö/g, "o")
+            .replace(/ç/g, "c")
+            .trim();
+
+          const monthNames = { january:0, february:1, march:2, april:3, may:4, june:5, july:6, august:7, september:8, october:9, november:10, december:11,
+            ocak:0, subat:1, mart:2, nisan:3, mayis:4, haziran:5, temmuz:6, agustos:7, eylul:8, ekim:9, kasim:10, aralik:11 };
+
+          const parseHeaderDate = (text) => {
+            const normalized = normalizeText(text);
+            const ym = normalized.match(/(20\d{2})/);
+            let month = null;
+            for (const [name, num] of Object.entries(monthNames)) {
+              if (normalized.includes(name)) { month = num; break; }
+            }
+            return { month, year: ym ? parseInt(ym[1], 10) : null, headerText: String(text || "").trim() };
+          };
+
+          const findCalendarRoot = (startNode) => {
+            let node = startNode;
+            let best = null;
+            let depth = 0;
+            while (node && node !== document.body && depth < 8) {
+              if (node.matches?.(calendarSelector) && isVisible(node)) {
+                const rect = node.getBoundingClientRect();
+                const dayCount = node.querySelectorAll?.("td").length || 0;
+                if (rect.width >= 140 && rect.height >= 120 && dayCount >= 20) best = node;
+              }
+              node = node.parentElement;
+              depth += 1;
+            }
+            return best;
+          };
+
           const scoreInput = (inp) => {
             const ph = (inp.placeholder || "").toLowerCase();
             const nm = (inp.name || inp.id || "").toLowerCase();
             const cls = (inp.className || "").toLowerCase();
+            const rect = inp.getBoundingClientRect();
+            const blob = `${ph} ${nm} ${cls}`;
             let score = 0;
             if (ph.includes("randevu")) score += 100;
-            if (ph.includes("seyahat") || ph.includes("gidiş") || nm.includes("travel") || nm.includes("seyahat")) score -= 120;
-            if (cls.includes("calendarinput")) score += 20;
+            if (nm.includes("randevu") || nm.includes("appointment")) score += 100;
+            if (blob.includes("calendarinput")) score += 20;
+            if (travelWords.some((w) => blob.includes(w))) score -= 140;
             if ((inp.value || "").trim()) score += 10;
+            if (hint?.id && inp.id === hint.id) score += 260;
+            if (hint?.name && inp.name === hint.name) score += 220;
+            if (hint?.placeholder && (inp.placeholder || "") === hint.placeholder) score += 160;
+            if (hint?.y != null) score -= Math.abs(rect.y - hint.y);
             return score;
           };
 
           const inputs = inputList.filter(isVisible).sort((a, b) => scoreInput(b) - scoreInput(a));
           for (const inp of inputs) {
+            const calendarRoot = findCalendarRoot(inp) || Array.from(document.querySelectorAll(calendarSelector))
+              .filter(isVisible)
+              .map((cal) => {
+                const rect = cal.getBoundingClientRect();
+                const centerX = rect.x + rect.width / 2;
+                const centerY = rect.y + rect.height / 2;
+                const distance = (anchorX != null && anchorY != null)
+                  ? Math.hypot(centerX - anchorX, centerY - anchorY)
+                  : 9999;
+                const insideX = anchorX != null && anchorX >= rect.x - 24 && anchorX <= rect.x + rect.width + 24;
+                const belowAnchor = anchorY != null ? rect.y >= anchorY - 90 : true;
+                const score = (insideX ? 220 : -Math.min(220, Math.abs(centerX - (anchorX ?? centerX)))) + (belowAnchor ? 180 : -260) - Math.round(distance);
+                return { cal, score, distance };
+              })
+              .sort((a, b) => b.score - a.score || a.distance - b.distance)[0]?.cal || null;
 
-            // Takvim header'ından ay/yıl oku
-            const header = document.querySelector(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch");
-            const headerText = header ? header.textContent.trim() : "";
-            const monthNames = {"January":0,"February":1,"March":2,"April":3,"May":4,"June":5,"July":6,"August":7,"September":8,"October":9,"November":10,"December":11,
-              "Ocak":0,"Şubat":1,"Mart":2,"Nisan":3,"Mayıs":4,"Haziran":5,"Temmuz":6,"Ağustos":7,"Eylül":8,"Ekim":9,"Kasım":10,"Aralık":11};
-            let month = new Date().getMonth(), year = new Date().getFullYear();
-            for (const [name, num] of Object.entries(monthNames)) {
-              if (headerText.includes(name)) { month = num; break; }
+            const headerNode = calendarRoot ? Array.from(calendarRoot.querySelectorAll(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch, .ui-datepicker-title, caption")).find(Boolean) : null;
+            const headerParsed = parseHeaderDate(headerNode ? headerNode.textContent : "");
+            let month = headerParsed.month;
+            let year = headerParsed.year;
+
+            if ((month == null || year == null) && expectedNormalized) {
+              const m = String(expectedNormalized).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+              if (m) {
+                year = parseInt(m[1], 10);
+                month = parseInt(m[2], 10) - 1;
+              }
             }
-            const ym = headerText.match(/(\d{4})/);
-            if (ym) year = parseInt(ym[1]);
+
+            if (month == null || year == null) {
+              month = new Date().getMonth();
+              year = new Date().getFullYear();
+            }
 
             const dateObj = new Date(year, month, d);
             const dateStrDash = `${String(d).padStart(2, "0")}-${String(month + 1).padStart(2, "0")}-${year}`;
-
-            // 1) jQuery $.data ile datepicker instance'ını al
             const dp = window.jQuery.data(inp, 'datepicker') || window.jQuery(inp).data('datepicker');
             if (dp) {
-              console.log("[FORCE-DATE] datepicker instance bulundu, internal state güncelleniyor...");
-              
-              // viewDate güncelle
               if (dp.viewDate !== undefined) dp.viewDate = new Date(year, month, d);
-              // selected güncelle
               if (dp.selected !== undefined) dp.selected = new Date(year, month, d);
-              // date güncelle (bazı sürümlerde)
               if (dp.date !== undefined) dp.date = new Date(year, month, d);
-              // dates array güncelle
-              if (dp.dates && typeof dp.dates.replace === "function") {
-                dp.dates.replace(dateObj);
-              }
-              
-              // setValue varsa çağır
-              if (typeof dp.setValue === "function") {
-                try { dp.setValue(dateStrDash); } catch(e) { console.log("[FORCE-DATE] setValue hata:", e.message); }
-              }
-              
-              // fill varsa çağır (takvimi yeniden çiz)
-              if (typeof dp.fill === "function") {
-                try { dp.fill(); } catch(e) {}
-              }
-              
-              // update varsa çağır
-              if (typeof dp.update === "function") {
-                try { dp.update(dateObj); } catch(e) {}
-              }
-              
-              // _updateDatepicker varsa çağır
-              if (typeof dp._updateDatepicker === "function") {
-                try { dp._updateDatepicker(); } catch(e) {}
-              }
-
-              // Picker DOM'unda active class güncelle
-              if (dp.picker) {
-                try {
-                  dp.picker.find("td.day").each(function() {
-                    const $this = window.jQuery(this);
-                    $this.removeClass("active");
-                    const dayText = parseInt($this.text());
-                    if (dayText === d && !$this.hasClass("old") && !$this.hasClass("new")) {
-                      $this.addClass("active");
-                    }
-                  });
-                } catch(e) {}
-              }
+              if (dp.dates && typeof dp.dates.replace === "function") dp.dates.replace(dateObj);
+              if (typeof dp.setValue === "function") { try { dp.setValue(dateStrDash); } catch(_) {} }
+              if (typeof dp.fill === "function") { try { dp.fill(); } catch(_) {} }
+              if (typeof dp.update === "function") { try { dp.update(dateObj); } catch(_) {} }
+              if (typeof dp._updateDatepicker === "function") { try { dp._updateDatepicker(); } catch(_) {} }
             }
 
-            // 2) jQuery datepicker API metodları
-            try {
-              window.jQuery(inp).datepicker("setDate", dateObj);
-              console.log("[FORCE-DATE] datepicker setDate çağrıldı:", dateObj.toISOString());
-            } catch(e1) {
-              try {
-                window.jQuery(inp).datepicker("update", dateStrDash);
-                console.log("[FORCE-DATE] datepicker update çağrıldı:", dateStrDash);
-              } catch(e2) {}
+            try { window.jQuery(inp).datepicker("setDate", dateObj); } catch(_) {
+              try { window.jQuery(inp).datepicker("update", dateStrDash); } catch(__) {}
             }
 
-            // 3) Trigger events
             window.jQuery(inp).trigger("changeDate");
             window.jQuery(inp).trigger("change");
             inp.dispatchEvent(new Event("change", { bubbles: true }));
 
-            // 4) Input değerini native setter ile de ayarla
             if (!inp.value || !inp.value.includes(String(d))) {
               const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
               nativeSetter.call(inp, dateStrDash);
@@ -3932,9 +3989,11 @@ async function bookEarliestAppointment(page, account) {
               inp.dispatchEvent(new Event("blur", { bubbles: true }));
             }
 
-            // 5) Tüm görünür takvimlerde active class elle ekle
-            document.querySelectorAll("[class*='datepicker'] td.day, table.table-condensed td.day, .datepicker-days td.day").forEach(td => {
-              const text = parseInt((td.innerText || td.textContent || "").trim());
+            const scopedCells = calendarRoot
+              ? calendarRoot.querySelectorAll("td.day, td")
+              : document.querySelectorAll("[class*='datepicker'] td.day, table.table-condensed td.day, .datepicker-days td.day");
+            scopedCells.forEach((td) => {
+              const text = parseInt((td.innerText || td.textContent || "").trim(), 10);
               if (text === d && !td.classList.contains("old") && !td.classList.contains("new")) {
                 td.classList.add("active");
               } else {
@@ -3942,10 +4001,10 @@ async function bookEarliestAppointment(page, account) {
               }
             });
 
-            return { success: true, inputValue: inp.value, dateStr: dateStrDash };
+            return { success: true, inputValue: inp.value, dateStr: dateStrDash, headerText: headerParsed.headerText || "" };
           }
           return { success: false, reason: "no_visible_input" };
-        }, dayNum);
+        }, dayNum, targetNormalized || null);
       };
 
       // === YÖNTEM 1: humanClick (Puppeteer gerçek mouse) ===
@@ -3972,7 +4031,7 @@ async function bookEarliestAppointment(page, account) {
       // === YÖNTEM 3: forceDateSelection (datepicker internal state) ===
       if (!dateVerify.isActive) {
         console.log("  [BOOK] Tarih aktif değil, forceDateSelection (internal state) deneniyor...");
-        const forceResult = await forceDateSelectionInternal(dateInfo.day);
+        const forceResult = await forceDateSelectionInternal(dateInfo.day, dateInfo.normalizedDate || null);
         console.log(`  [BOOK] forceDateSelection sonuç: ${JSON.stringify(forceResult)}`);
         await delay(1500, 2000);
         dateVerify = await verifyDateSelection();
@@ -4162,7 +4221,7 @@ async function bookEarliestAppointment(page, account) {
 
             console.log(`  [BOOK] ✅ Element handle güçlü tıklama: Gün ${targetDay.day} mesafe=${Math.round(targetDay.distance)}`);
             await delay(800, 1300);
-            const forceResult2 = await forceDateSelectionInternal(targetDay.day);
+            const forceResult2 = await forceDateSelectionInternal(targetDay.day, dateInfo.normalizedDate || null);
             console.log(`  [BOOK] Element handle + force sonuç: ${JSON.stringify(forceResult2)}`);
           }
 
@@ -4200,10 +4259,30 @@ async function bookEarliestAppointment(page, account) {
 
     if (!dateSelected.selected && dateInfo?.found) {
       // Sadece yeşil olarak tespit edilen gün için input fallback uygula
-      const headerText = await page.evaluate(() => {
-        const header = document.querySelector(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch");
+      const headerText = await page.evaluate((anchorX, anchorY) => {
+        const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const cals = Array.from(document.querySelectorAll(calendarSelector)).filter(isVisible);
+        const picked = cals
+          .map((cal) => {
+            const rect = cal.getBoundingClientRect();
+            const centerX = rect.x + rect.width / 2;
+            const centerY = rect.y + rect.height / 2;
+            const distance = (anchorX != null && anchorY != null) ? Math.hypot(centerX - anchorX, centerY - anchorY) : 9999;
+            const insideX = anchorX != null && anchorX >= rect.x - 24 && anchorX <= rect.x + rect.width + 24;
+            const belowAnchor = anchorY != null ? rect.y >= anchorY - 90 : true;
+            const score = (insideX ? 220 : -Math.min(220, Math.abs(centerX - (anchorX ?? centerX)))) + (belowAnchor ? 180 : -260) - Math.round(distance);
+            return { cal, score, distance };
+          })
+          .sort((a, b) => b.score - a.score || a.distance - b.distance)[0]?.cal || null;
+        const header = picked ? Array.from(picked.querySelectorAll(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch, .ui-datepicker-title, caption")).find(Boolean) : null;
         return header ? (header.textContent || "").trim() : "";
-      }).catch(() => "");
+      }, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null).catch(() => "");
 
       const monthMap = {
         january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
@@ -4702,90 +4781,113 @@ async function bookEarliestAppointment(page, account) {
 
         // ===== TAMAM'dan sonra yeniden tarih seç (yalnızca ilk ekrandaki açık tarihler) =====
         const retryTargetDate = announcedAppointmentDates[warningRetry % Math.max(announcedAppointmentDates.length, 1)] || preferredAppointmentDate || null;
-        const retryDateInfo = await page.evaluate((targetNormalized, allowedDates) => {
+        const retryDateInfo = await page.evaluate((targetNormalized, allowedDates, anchorX, anchorY) => {
+          const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
           const allowedSet = new Set((allowedDates || []).filter(Boolean));
           const monthMap = {
             january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
             ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5, haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9, ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12,
           };
+          const normalizeText = (value) => String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i").replace(/ğ/g, "g").replace(/ş/g, "s").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c");
           const parseMonthYear = (text) => {
-            const raw = String(text || "").trim().toLowerCase();
+            const raw = normalizeText(text);
             const yearMatch = raw.match(/(20\d{2})/);
             let month = null;
             for (const [name, num] of Object.entries(monthMap)) {
-              if (raw.includes(name)) {
-                month = num;
-                break;
-              }
+              if (raw.includes(normalizeText(name))) { month = num; break; }
             }
             return { month, year: yearMatch ? parseInt(yearMatch[1], 10) : null };
           };
+          const isVisible = (el) => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          };
+          const findCalendarRoot = (startNode) => {
+            let node = startNode;
+            let best = null;
+            let depth = 0;
+            while (node && node !== document.body && depth < 8) {
+              if (node.matches?.(calendarSelector) && isVisible(node)) {
+                const rect = node.getBoundingClientRect();
+                const dayCount = node.querySelectorAll?.("td").length || 0;
+                if (rect.width >= 140 && rect.height >= 120 && dayCount >= 20) best = node;
+              }
+              node = node.parentElement;
+              depth += 1;
+            }
+            return best;
+          };
 
-          const calContainers = document.querySelectorAll(
-            ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, " +
-            ".datepicker-days, .flatpickr-calendar, .ui-datepicker, " +
-            "[class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed"
-          );
-          const allDays = [];
-          for (const cal of calContainers) {
+          const roots = Array.from(document.querySelectorAll(calendarSelector))
+            .map((node) => findCalendarRoot(node) || node)
+            .filter((node, idx, arr) => node && isVisible(node) && arr.indexOf(node) === idx);
+
+          const scoredCalendars = roots.map((cal) => {
             const style = window.getComputedStyle(cal);
-            if (style.display === "none" || style.visibility === "hidden") continue;
-
+            const calRect = cal.getBoundingClientRect();
             const headerNodes = Array.from(cal.querySelectorAll(".datepicker-switch, .picker-switch, .datepicker th.switch, .ui-datepicker-title, caption, th"));
             let displayedMonth = null;
             let displayedYear = null;
             for (const node of headerNodes) {
               const parsed = parseMonthYear(node.innerText || node.textContent || "");
-              if (parsed.month && parsed.year) {
-                displayedMonth = parsed.month;
-                displayedYear = parsed.year;
-                break;
-              }
+              if (parsed.month && parsed.year) { displayedMonth = parsed.month; displayedYear = parsed.year; break; }
             }
+            const centerX = calRect.x + calRect.width / 2;
+            const centerY = calRect.y + calRect.height / 2;
+            const distance = (anchorX != null && anchorY != null) ? Math.hypot(centerX - anchorX, centerY - anchorY) : 9999;
+            const insideX = anchorX != null && anchorX >= calRect.x - 24 && anchorX <= calRect.x + calRect.width + 24;
+            const belowAnchor = anchorY != null ? calRect.y >= anchorY - 90 : true;
+            const zIndex = parseInt(style.zIndex || "0", 10) || 0;
+            const score = (insideX ? 220 : -Math.min(220, Math.abs(centerX - (anchorX ?? centerX)))) + (belowAnchor ? 180 : -260) + Math.min(zIndex, 999) / 5 - Math.round(distance);
+            return { cal, displayedMonth, displayedYear, score, distance };
+          }).sort((a, b) => b.score - a.score || a.distance - b.distance);
 
-            const tds = cal.querySelectorAll("td");
-            for (const d of tds) {
-              const text = (d.innerText || d.textContent || "").trim();
-              if (!/^\d{1,2}$/.test(text)) continue;
-              const childFlagEl = d.querySelector("a, span, div");
-              const classBlob = `${d.className || ""} ${childFlagEl?.className || ""}`.toLowerCase();
-              if (classBlob.includes("disabled") || classBlob.includes("off") || classBlob.includes("old") || classBlob.includes("new") || classBlob.includes("disabled-day")) continue;
+          const pickedCalendar = scoredCalendars[0] || null;
+          if (!pickedCalendar) return { found: false };
 
-              const dayNum = parseInt(text, 10);
-              const tdBg = window.getComputedStyle(d).backgroundColor;
-              const childBg = childFlagEl ? window.getComputedStyle(childFlagEl).backgroundColor : "";
-              const bgColor = childBg && childBg !== "rgba(0, 0, 0, 0)" ? childBg : tdBg;
-              const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-              let isGreen = false;
-              let isYellow = false;
-              let isRed = false;
-              if (rgbMatch) {
-                const r = parseInt(rgbMatch[1], 10), g = parseInt(rgbMatch[2], 10), b = parseInt(rgbMatch[3], 10);
-                isGreen = g > 100 && g > r * 1.2 && g > b * 1.2;
-                isYellow = r > 200 && g > 150 && b < 120;
-                isRed = r > 150 && r > g * 1.4 && r > b * 1.4;
-              }
-              if (d.classList.contains("bg-success") || d.classList.contains("success") || classBlob.includes("enabled-day") || classBlob.includes("bg-success")) isGreen = true;
-              if (d.classList.contains("bg-warning") || d.classList.contains("warning") || d.classList.contains("today") || d.classList.contains("active") || classBlob.includes("bg-warning") || classBlob.includes("warning") || classBlob.includes("active")) isYellow = true;
-              if (d.classList.contains("bg-danger") || d.classList.contains("danger") || classBlob.includes("bg-danger") || classBlob.includes("danger")) isRed = true;
-              if (!isGreen || isYellow || isRed) continue;
+          const allDays = [];
+          const tds = pickedCalendar.cal.querySelectorAll("td");
+          for (const d of tds) {
+            const text = (d.innerText || d.textContent || "").trim();
+            if (!/^\d{1,2}$/.test(text)) continue;
+            const childFlagEl = d.querySelector("a, span, div");
+            const classBlob = `${d.className || ""} ${childFlagEl?.className || ""}`.toLowerCase();
+            if (classBlob.includes("disabled") || classBlob.includes("off") || classBlob.includes("old") || classBlob.includes("new") || classBlob.includes("disabled-day")) continue;
 
-              const normalizedDate = displayedMonth && displayedYear
-                ? `${displayedYear}-${String(displayedMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`
-                : null;
-              if (allowedSet.size > 0 && (!normalizedDate || !allowedSet.has(normalizedDate))) continue;
+            const dayNum = parseInt(text, 10);
+            const tdBg = window.getComputedStyle(d).backgroundColor;
+            const childBg = childFlagEl ? window.getComputedStyle(childFlagEl).backgroundColor : "";
+            const bgColor = childBg && childBg !== "rgba(0, 0, 0, 0)" ? childBg : tdBg;
+            const rgbMatch = bgColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            let isGreen = false, isYellow = false, isRed = false;
+            if (rgbMatch) {
+              const r = parseInt(rgbMatch[1], 10), g = parseInt(rgbMatch[2], 10), b = parseInt(rgbMatch[3], 10);
+              isGreen = g > 100 && g > r * 1.2 && g > b * 1.2;
+              isYellow = r > 200 && g > 150 && b < 120;
+              isRed = r > 150 && r > g * 1.4 && r > b * 1.4;
+            }
+            if (d.classList.contains("bg-success") || d.classList.contains("success") || classBlob.includes("enabled-day") || classBlob.includes("bg-success")) isGreen = true;
+            if (d.classList.contains("bg-warning") || d.classList.contains("warning") || d.classList.contains("today") || d.classList.contains("active") || classBlob.includes("bg-warning") || classBlob.includes("warning") || classBlob.includes("active")) isYellow = true;
+            if (d.classList.contains("bg-danger") || d.classList.contains("danger") || classBlob.includes("bg-danger") || classBlob.includes("danger")) isRed = true;
+            if (!isGreen || isYellow || isRed) continue;
 
-              const innerLink = d.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
-              const postbackHref = innerLink ? (innerLink.getAttribute("href") || "") : "";
-              let postbackTarget = null, postbackArg = null;
-              const pbMatch = postbackHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
-              if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
+            const normalizedDate = pickedCalendar.displayedMonth && pickedCalendar.displayedYear
+              ? `${pickedCalendar.displayedYear}-${String(pickedCalendar.displayedMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`
+              : null;
+            if (allowedSet.size > 0 && (!normalizedDate || !allowedSet.has(normalizedDate))) continue;
 
-              const clickableEl = innerLink || d;
-              const rect = clickableEl.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                allDays.push({ day: dayNum, normalizedDate, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, postbackTarget, postbackArg, hasLink: !!innerLink });
-              }
+            const innerLink = d.querySelector("a[href*='doPostBack'], a[href*='javascript'], a");
+            const postbackHref = innerLink ? (innerLink.getAttribute("href") || "") : "";
+            let postbackTarget = null, postbackArg = null;
+            const pbMatch = postbackHref.match(/__doPostBack\(['"](.*?)['"],\s*['"](.*?)['"]\)/);
+            if (pbMatch) { postbackTarget = pbMatch[1]; postbackArg = pbMatch[2]; }
+
+            const clickableEl = innerLink || d;
+            const rect = clickableEl.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+              allDays.push({ day: dayNum, normalizedDate, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, postbackTarget, postbackArg, hasLink: !!innerLink });
             }
           }
           allDays.sort((a, b) => (a.normalizedDate || "").localeCompare(b.normalizedDate || "") || a.day - b.day);
@@ -4794,7 +4896,7 @@ async function bookEarliestAppointment(page, account) {
             return { found: true, day: target.day, normalizedDate: target.normalizedDate, x: target.x, y: target.y, greenCount: allDays.length, postbackTarget: target.postbackTarget, postbackArg: target.postbackArg, hasLink: target.hasLink };
           }
           return { found: false };
-        }, retryTargetDate?.normalized ?? null, announcedAppointmentDateKeys);
+        }, retryTargetDate?.normalized ?? null, announcedAppointmentDateKeys, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null);
 
         if (retryDateInfo.found) {
           console.log(`  [BOOK] 📅 Retry tarih seçimi: Gün ${retryDateInfo.day} (${retryDateInfo.greenCount} yeşil, postback=${!!retryDateInfo.postbackTarget})`);
