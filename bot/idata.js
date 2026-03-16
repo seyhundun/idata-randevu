@@ -1349,7 +1349,7 @@ async function tryImapOtp(accountId) {
 
     // Hesap bilgilerini al
     const res = await fetch(
-      `https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/idata_accounts?id=eq.${accountId}&select=email,imap_host,imap_password,otp_requested_at`,
+      `${SUPABASE_URL}/rest/v1/idata_accounts?id=eq.${accountId}&select=email,imap_host,imap_password,otp_requested_at`,
       {
         headers: {
           apikey: CONFIG.API_KEY,
