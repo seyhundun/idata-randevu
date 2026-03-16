@@ -3657,6 +3657,8 @@ async function bookEarliestAppointment(page, account) {
           isGreen: target.isGreen,
           x: target.x,
           y: target.y,
+          cellX: target.cellX,
+          cellY: target.cellY,
           totalDays: allDays.length,
           greenCount: selectableDays.length,
           bgColor: target.bgColor,
