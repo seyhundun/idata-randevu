@@ -4255,10 +4255,30 @@ async function bookEarliestAppointment(page, account) {
 
     if (!dateSelected.selected && dateInfo?.found) {
       // Sadece yeşil olarak tespit edilen gün için input fallback uygula
-      const headerText = await page.evaluate(() => {
-        const header = document.querySelector(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch");
+      const headerText = await page.evaluate((anchorX, anchorY) => {
+        const calendarSelector = ".datepicker, .datepicker-dropdown, .bootstrap-datetimepicker-widget, .datepicker-days, .flatpickr-calendar, .ui-datepicker, [class*='datepicker'], [class*='calendar'], .picker-open, table.table-condensed";
+        const isVisible = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const cals = Array.from(document.querySelectorAll(calendarSelector)).filter(isVisible);
+        const picked = cals
+          .map((cal) => {
+            const rect = cal.getBoundingClientRect();
+            const centerX = rect.x + rect.width / 2;
+            const centerY = rect.y + rect.height / 2;
+            const distance = (anchorX != null && anchorY != null) ? Math.hypot(centerX - anchorX, centerY - anchorY) : 9999;
+            const insideX = anchorX != null && anchorX >= rect.x - 24 && anchorX <= rect.x + rect.width + 24;
+            const belowAnchor = anchorY != null ? rect.y >= anchorY - 90 : true;
+            const score = (insideX ? 220 : -Math.min(220, Math.abs(centerX - (anchorX ?? centerX)))) + (belowAnchor ? 180 : -260) - Math.round(distance);
+            return { cal, score, distance };
+          })
+          .sort((a, b) => b.score - a.score || a.distance - b.distance)[0]?.cal || null;
+        const header = picked ? Array.from(picked.querySelectorAll(".datepicker-switch, .datepicker-days th.datepicker-switch, th.switch, .ui-datepicker-title, caption")).find(Boolean) : null;
         return header ? (header.textContent || "").trim() : "";
-      }).catch(() => "");
+      }, calIconClicked?.inputX ?? null, calIconClicked?.inputY ?? null).catch(() => "");
 
       const monthMap = {
         january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
