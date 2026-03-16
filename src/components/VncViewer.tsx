@@ -145,29 +145,24 @@ const VncViewer = ({ title, defaultHost = "85.235.75.101:6081", pathPrefix = "/i
             <Monitor className="w-10 h-10 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">Tarayıcı ekranını izlemek için bağlanın</p>
             <p className="text-[10px] text-muted-foreground/60 font-mono">{scheme}://{host}</p>
+            {isHttpsApp && scheme === "http" && (
+              <p className="text-[10px] text-amber-500 max-w-xs text-center">
+                ⚠️ HTTPS dashboard'da HTTP VNC embed edilemez. Yeni sekmede açılacak.
+              </p>
+            )}
             <Button size="sm" onClick={handleConnect} className="gap-1.5">
-              <Wifi className="w-3.5 h-3.5" />
-              Bağlan
+              {isHttpsApp && scheme === "http" ? (
+                <>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Yeni Sekmede Aç
+                </>
+              ) : (
+                <>
+                  <Wifi className="w-3.5 h-3.5" />
+                  Bağlan
+                </>
+              )}
             </Button>
-          </div>
-        ) : mixedContentBlocked ? (
-          <div className="p-3 bg-muted/30">
-            <Alert>
-              <ShieldAlert className="h-4 w-4" />
-              <AlertDescription className="space-y-2">
-                <p className="text-xs">
-                  HTTPS dashboard içinde HTTP VNC iframe güvenlik nedeniyle bloklanır.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" className="h-7 text-xs" onClick={handleOpenExternal}>
-                    Yeni Sekmede Aç
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setScheme("https")}>
-                    HTTPS Dene
-                  </Button>
-                </div>
-              </AlertDescription>
-            </Alert>
           </div>
         ) : (
           <div className="relative bg-black">
