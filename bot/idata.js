@@ -7,9 +7,12 @@
 require("dotenv").config();
 
 // ==================== CONFIG ====================
+const PROJECT_REF = process.env.VITE_SUPABASE_PROJECT_ID || "lioqcdnpcufbaihkzhct";
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || `https://${PROJECT_REF}.supabase.co`;
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxpb3FjZG5wY3VmYmFpaGt6aGN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NTE2NjEsImV4cCI6MjA4OTIyNzY2MX0.MVil0ms9SFplMwjuyMYMFvuyT_s2yUzJ4f4dmgtnbvg";
 const CONFIG = {
-  API_URL: "https://ocrpzwrsyiprfuzsyivf.supabase.co/functions/v1/bot-api",
-  API_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
+  API_URL: `${SUPABASE_URL}/functions/v1/bot-api`,
+  API_KEY: SUPABASE_ANON_KEY,
   CAPTCHA_API_KEY: (process.env.CAPTCHA_API_KEY || process.env.TWOCAPTCHA_API_KEY || "").trim(),
   OTP_EMAIL_FROM: (process.env.IDATA_OTP_FROM || "verify@idata.com.tr").trim().toLowerCase(),
   REGISTER_URL: "https://it-tr-appointment.idata.com.tr/tr/membership/register",
@@ -46,10 +49,10 @@ async function loadProxySettingsFromDB() {
   try {
     const fetch = (await import("node-fetch")).default;
     const res = await fetch(
-      "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/bot_settings?select=key,value",
+      `${SUPABASE_URL}/rest/v1/bot_settings?select=key,value`,
       {
         headers: {
-          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
+          apikey: CONFIG.API_KEY,
           "Content-Type": "application/json",
         },
       }
@@ -111,7 +114,7 @@ async function fetchEvomiRegions() {
     const fetch = (await import("node-fetch")).default;
     // bot_settings'den evomi_api_key al
     const settingsRes = await fetch(
-      "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/bot_settings?select=key,value",
+      `${SUPABASE_URL}/rest/v1/bot_settings?select=key,value`,
       {
         headers: {
           apikey: CONFIG.API_KEY,
@@ -608,7 +611,7 @@ async function signalCfBlocked(ip) {
   try {
     await fetch(CONFIG.API_URL + "/idata", { method: "GET", headers: apiHeaders }); // config'i al
     // Doğrudan Supabase REST API ile güncelle
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
       method: "PATCH",
       headers: {
@@ -630,7 +633,7 @@ async function signalCfBlocked(ip) {
 // CF retry isteği var mı kontrol et
 async function checkCfRetryRequested() {
   try {
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     const res = await fetch(`${supabaseUrl}/rest/v1/idata_config?select=cf_retry_requested&limit=1`, {
       method: "GET",
       headers: apiHeaders,
@@ -654,7 +657,7 @@ async function checkCfRetryRequested() {
 // CF blocked durumunu temizle
 async function clearCfBlocked() {
   try {
-    const supabaseUrl = "https://ocrpzwrsyiprfuzsyivf.supabase.co";
+    const supabaseUrl = SUPABASE_URL;
     await fetch(`${supabaseUrl}/rest/v1/idata_config?id=not.is.null`, {
       method: "PATCH",
       headers: { ...apiHeaders, "Prefer": "return=minimal" },
@@ -1346,7 +1349,7 @@ async function tryImapOtp(accountId) {
 
     // Hesap bilgilerini al
     const res = await fetch(
-      `https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/idata_accounts?id=eq.${accountId}&select=email,imap_host,imap_password,otp_requested_at`,
+      `${SUPABASE_URL}/rest/v1/idata_accounts?id=eq.${accountId}&select=email,imap_host,imap_password,otp_requested_at`,
       {
         headers: {
           apikey: CONFIG.API_KEY,
