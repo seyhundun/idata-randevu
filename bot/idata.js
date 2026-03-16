@@ -4027,7 +4027,7 @@ async function bookEarliestAppointment(page, account) {
       // === YÖNTEM 3: forceDateSelection (datepicker internal state) ===
       if (!dateVerify.isActive) {
         console.log("  [BOOK] Tarih aktif değil, forceDateSelection (internal state) deneniyor...");
-        const forceResult = await forceDateSelectionInternal(dateInfo.day);
+        const forceResult = await forceDateSelectionInternal(dateInfo.day, dateInfo.normalizedDate || null);
         console.log(`  [BOOK] forceDateSelection sonuç: ${JSON.stringify(forceResult)}`);
         await delay(1500, 2000);
         dateVerify = await verifyDateSelection();
