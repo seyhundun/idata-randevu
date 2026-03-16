@@ -28,9 +28,14 @@ const VncViewer = ({ title, defaultHost = "85.235.75.101:6081", pathPrefix = "/i
   const vncUrl = `${scheme}://${host}/vnc.html?autoconnect=1&resize=scale&reconnect=true&reconnect_delay=3000`;
 
   const handleConnect = useCallback(() => {
+    if (isHttpsApp && scheme === "http") {
+      // HTTPS dashboard'da HTTP iframe bloklanır, direkt yeni sekmede aç
+      window.open(vncUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     setIsConnected(true);
     setIframeKey((prev) => prev + 1);
-  }, []);
+  }, [isHttpsApp, scheme, vncUrl]);
 
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
