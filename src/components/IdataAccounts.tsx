@@ -400,14 +400,14 @@ export default function IdataAccounts() {
             </div>
             <div>
               <Label className="text-xs">iDATA Ofisi</Label>
-              {filteredOffices.length > 0 ? (
+              {cityOffices.length > 0 ? (
                 <select
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={form.idata_office}
                   onChange={e => updateForm("idata_office", e.target.value)}
                 >
                   <option value="">iDATA Ofisi Seçiniz</option>
-                  {filteredOffices.map(o => <option key={o.office_value} value={o.office_name}>{o.office_name}</option>)}
+                  {cityOffices.map(o => <option key={o.office_value} value={o.office_name}>{o.office_name}</option>)}
                 </select>
               ) : (
                 <Input placeholder="İstanbul" value={form.idata_office} onChange={e => updateForm("idata_office", e.target.value)} />
