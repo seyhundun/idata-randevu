@@ -49,10 +49,10 @@ async function loadProxySettingsFromDB() {
   try {
     const fetch = (await import("node-fetch")).default;
     const res = await fetch(
-      "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/bot_settings?select=key,value",
+      `${SUPABASE_URL}/rest/v1/bot_settings?select=key,value`,
       {
         headers: {
-          apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jcnB6d3JzeWlwcmZ1enN5aXZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMDQ1NzksImV4cCI6MjA4ODg4MDU3OX0.5MzKGm6byd1zLxjgxaXyQq5VfPFo_CE2MhcXijIRarc",
+          apikey: CONFIG.API_KEY,
           "Content-Type": "application/json",
         },
       }
