@@ -5,7 +5,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import Index from "./pages/Index.tsx";
-import IdataPage from "./pages/IdataPage.tsx";
 import LoginPage from "./pages/LoginPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import GuidePage from "./pages/GuidePage.tsx";
