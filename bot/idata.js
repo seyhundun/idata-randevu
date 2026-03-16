@@ -114,7 +114,7 @@ async function fetchEvomiRegions() {
     const fetch = (await import("node-fetch")).default;
     // bot_settings'den evomi_api_key al
     const settingsRes = await fetch(
-      "https://ocrpzwrsyiprfuzsyivf.supabase.co/rest/v1/bot_settings?select=key,value",
+      `${SUPABASE_URL}/rest/v1/bot_settings?select=key,value`,
       {
         headers: {
           apikey: CONFIG.API_KEY,
