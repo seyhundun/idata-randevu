@@ -232,13 +232,8 @@ echo "✅ Güncelleme tamamlandı"`}
           <CopyBlock
             label="noVNC erişim adresleri"
             description="Dashboard üzerinden veya doğrudan tarayıcıdan canlı izleme"
-            command={`# Dashboard (HTTPS — önerilen):
-# VFS:   https://vnc.fipacomputer.online/vfs/vnc.html
-# iDATA: https://vnc.fipacomputer.online/idata/vnc.html
-
-# Doğrudan HTTP (sunucu IP ile):
-# VFS:   http://187.77.161.201:6080/vnc.html
-# iDATA: http://187.77.161.201:6081/vnc.html`}
+            command={`# iDATA noVNC erişimi:
+# http://85.235.75.101:6081/vnc.html`}
           />
         </Section>
 

@@ -139,7 +139,7 @@ const VncViewer = ({ title, defaultHost = "85.235.75.101:6081", pathPrefix = "/i
           <div className="flex flex-col items-center justify-center py-10 gap-3 bg-muted/30">
             <Monitor className="w-10 h-10 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">Tarayıcı ekranını izlemek için bağlanın</p>
-            <p className="text-[10px] text-muted-foreground/60 font-mono">{scheme}://{host}{pathPrefix}</p>
+            <p className="text-[10px] text-muted-foreground/60 font-mono">{scheme}://{host}</p>
             <Button size="sm" onClick={handleConnect} className="gap-1.5">
               <Wifi className="w-3.5 h-3.5" />
               Bağlan
