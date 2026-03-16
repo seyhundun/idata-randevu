@@ -25,7 +25,7 @@ const VncViewer = ({ title, defaultHost = "85.235.75.101:6081", pathPrefix = "/i
   const isHttpsApp = useMemo(() => window.location.protocol === "https:", []);
   const mixedContentBlocked = isHttpsApp && scheme === "http";
 
-  const vncUrl = `${scheme}://${host}/vnc.html?autoconnect=1&resize=scale&reconnect=true&reconnect_delay=3000`;
+  const vncUrl = `${scheme}://${host}/vnc.html?autoconnect=1&resize=scale&reconnect=true&reconnect_delay=3000&path=${encodeURIComponent((pathPrefix || "") + "/websockify")}`;
 
   const handleConnect = useCallback(() => {
     if (isHttpsApp && scheme === "http") {
